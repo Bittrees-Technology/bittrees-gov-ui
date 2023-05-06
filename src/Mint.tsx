@@ -1,9 +1,18 @@
-import { useAccount, usePrepareContractWrite, useContractWrite } from "wagmi";
+import {
+  useAccount,
+  usePrepareContractWrite,
+  useContractWrite,
+  useContractRead,
+} from "wagmi";
 import abi from "./abi.json";
+import btreeAbi from "./abi-btree.json";
 import { goerli, mainnet } from "wagmi/chains";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { ethers } from "ethers";
 
 const CONTRACT_ADDRESS = "0x81Ed0A98c0BD6A75240fD4F65E5e2c43d7b343D9";
+const BTREE_CONTRACT_ADDRESS = "0x1Ca23BB7dca2BEa5F57552AE99C3A44fA7307B5f";
+
 const chainId =
   process.env.REACT_APP_ENABLE_TESTNETS === "true" ? goerli.id : mainnet.id;
 
@@ -28,6 +37,7 @@ function displayFriendlyError(message: string | undefined): string {
 
 export function Mint() {
   const [mintCount, setMintcount] = useState(1);
+  const [allowance, setAllowance] = useState<bigint>(BigInt(0));
   const [total, setTotal] = useState(mintPrice);
 
   function calcTotal(count: string) {
@@ -53,11 +63,27 @@ export function Mint() {
     write?.();
   }
 
+  const { data: allowanceData, isLoading: allowanceIsLoading } =
+    useContractRead({
+      address: BTREE_CONTRACT_ADDRESS,
+      abi: btreeAbi,
+      functionName: "allowance",
+      args: [address, CONTRACT_ADDRESS],
+    });
+
+  useEffect(() => {
+    if (allowanceData) {
+      setAllowance(ethers.BigNumber.from(allowanceData).toBigInt());
+    }
+  }, [allowanceData]);
+
   return (
     <>
       <div className="grid grid-cols-2 gap-6 justify-start font-newtimesroman">
         <div className="text-right">Cost per BGOV token:</div>
-        <div className="text-left">{mintPrice} BTREE</div>
+        <div className="text-left">
+          {parseInt(mintPrice, 10).toLocaleString()} BTREE
+        </div>
         <div className="text-right">Number of tokens to mint:</div>
         <div className="text-left">
           <input
@@ -71,9 +97,14 @@ export function Mint() {
         </div>
         <div className="text-right">Total price:</div>
         <div className="text-left">
-          {total} <span>BTREE</span>
+          {parseInt(total, 10).toLocaleString()} <span>BTREE</span>
         </div>
       </div>
+      <p className="mt-2 font-newtimesroman">
+        The allowance of BTREE you've granted for minting is{" "}
+        {parseInt(ethers.utils.formatEther(allowance), 10).toLocaleString()}.
+      </p>
+
       <div className="m-4 mt-8 mx-auto max-w-xl font-newtimesroman">
         <p className="text-xl">What's required for minting?</p>
         <p className="mt-2">
@@ -95,7 +126,11 @@ export function Mint() {
         <button
           className="btn btn-primary"
           onClick={onClick}
-          disabled={!Boolean(address) || Boolean(error)}
+          disabled={
+            !Boolean(address) ||
+            Boolean(error) ||
+            Boolean(allowance >= BigInt(total))
+          }
         >
           Mint
         </button>
