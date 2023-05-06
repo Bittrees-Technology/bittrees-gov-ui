@@ -173,7 +173,6 @@ export function Mint() {
           disabled={
             !Boolean(address) ||
             Boolean(error) ||
-            Boolean(allowance < BigInt(total)) ||
             Boolean(btreeBalance < BigInt(total))
           }
         >
