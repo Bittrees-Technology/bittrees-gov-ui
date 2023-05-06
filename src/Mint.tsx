@@ -2,7 +2,7 @@ import {
   useAccount,
   usePrepareContractWrite,
   useContractWrite,
-  useContractRead,
+  useContractReads,
 } from "wagmi";
 import abi from "./abi.json";
 import btreeAbi from "./abi-btree.json";
@@ -19,7 +19,7 @@ const chainId =
 console.info(`Contract: ${CONTRACT_ADDRESS}`);
 console.info(`Chain ID: ${chainId}`);
 
-const mintPrice = "1000";
+const mintPrice = ethers.utils.parseUnits("1000.0", "ether").toBigInt();
 
 function displayFriendlyError(message: string | undefined): string {
   if (!message) return "";
@@ -38,14 +38,13 @@ function displayFriendlyError(message: string | undefined): string {
 export function Mint() {
   const [mintCount, setMintcount] = useState(1);
   const [allowance, setAllowance] = useState<bigint>(BigInt(0));
-  const [total, setTotal] = useState(mintPrice);
+  const [btreeBalance, setBtreeBalance] = useState<bigint>(BigInt(0));
+  const [total, setTotal] = useState<bigint>(mintPrice);
 
   function calcTotal(count: string) {
     setMintcount(parseInt(count, 10));
-    const total = (
-      parseInt(mintPrice, 10) * parseInt(count ? count : "0", 10)
-    ).toFixed(0);
-    setTotal(total);
+    const totalEther = mintPrice * BigInt(parseInt(count ? count : "0", 10));
+    setTotal(totalEther);
   }
 
   const { address } = useAccount();
@@ -63,50 +62,95 @@ export function Mint() {
     write?.();
   }
 
-  const { data: allowanceData, isLoading: allowanceIsLoading } =
-    useContractRead({
-      address: BTREE_CONTRACT_ADDRESS,
-      abi: btreeAbi,
-      functionName: "allowance",
-      args: [address, CONTRACT_ADDRESS],
-    });
+  const { data: btreeData, isLoading: btreeIsLoading } = useContractReads({
+    contracts: [
+      {
+        address: BTREE_CONTRACT_ADDRESS,
+        abi: btreeAbi,
+        functionName: "allowance",
+        args: [address, CONTRACT_ADDRESS],
+      },
+      {
+        address: BTREE_CONTRACT_ADDRESS,
+        abi: btreeAbi,
+        functionName: "balanceOf",
+        args: [address],
+      },
+    ],
+  });
+
+  console.log({ btreeData });
 
   useEffect(() => {
-    if (allowanceData) {
-      setAllowance(ethers.BigNumber.from(allowanceData).toBigInt());
+    if (btreeData) {
+      setAllowance(ethers.BigNumber.from(btreeData[0]).toBigInt());
+      setBtreeBalance(ethers.BigNumber.from(btreeData[1]).toBigInt());
     }
-  }, [allowanceData]);
+  }, [btreeData]);
 
   return (
     <>
       <div className="grid grid-cols-2 gap-6 justify-start font-newtimesroman">
         <div className="text-right">Cost per BGOV token:</div>
         <div className="text-left">
-          {parseInt(mintPrice, 10).toLocaleString()} BTREE
+          {parseInt(ethers.utils.formatEther(mintPrice), 10).toLocaleString()}{" "}
+          BTREE
         </div>
         <div className="text-right">Number of tokens to mint:</div>
         <div className="text-left">
           <input
             className="w-20 input-sm"
             type="number"
-            placeholder="1"
             onChange={(e) => calcTotal(e.target.value)}
             step="1"
             min="1"
+            value={mintCount}
           />
         </div>
         <div className="text-right">Total price:</div>
         <div className="text-left">
-          {parseInt(total, 10).toLocaleString()} <span>BTREE</span>
+          {parseInt(ethers.utils.formatEther(total), 10).toLocaleString()}{" "}
+          <span>BTREE</span>
         </div>
       </div>
-      <p className="mt-2 font-newtimesroman">
-        The allowance of BTREE you've granted for minting is{" "}
-        {parseInt(ethers.utils.formatEther(allowance), 10).toLocaleString()}.
-      </p>
+      {btreeIsLoading && (
+        <div className="mt-2 font-newtimesroman">
+          Loading your BTREE holdings and allowance information...
+        </div>
+      )}
+      {!btreeIsLoading && (
+        <div className="mt-6 font-newtimesroman w-1/2 mx-auto">
+          <p className="text-xl underline">Your BTREE Holdings</p>
+          <p className="mt-2">
+            Your BTREE holdings are{" "}
+            {parseInt(
+              ethers.utils.formatEther(btreeBalance),
+              10
+            ).toLocaleString()}
+            .{" "}
+            {btreeBalance < BigInt(total) && (
+              <span className="font-bold text-red-500">
+                Note that your wallet does not have enough BTREE tokens to mint{" "}
+                {mintCount} BGOV tokens.
+              </span>
+            )}
+          </p>
+          <p className="mt-2">
+            The allowance of BTREE you've granted for minting is{" "}
+            {parseInt(ethers.utils.formatEther(allowance), 10).toLocaleString()}
+            .{" "}
+            {allowance < BigInt(total) && (
+              <span className="font-bold">
+                When you mint, the first transaction will be to grant an
+                allowance.
+              </span>
+            )}
+          </p>
+        </div>
+      )}
 
       <div className="m-4 mt-8 mx-auto max-w-xl font-newtimesroman">
-        <p className="text-xl">What's required for minting?</p>
+        <p className="text-xl underline">What's required for minting?</p>
         <p className="mt-2">
           To transfer BTREE tokens, you'll need ETH in your wallet. There will
           also be two transactions. The first to grant permissions for our
@@ -129,7 +173,8 @@ export function Mint() {
           disabled={
             !Boolean(address) ||
             Boolean(error) ||
-            Boolean(allowance >= BigInt(total))
+            Boolean(allowance < BigInt(total)) ||
+            Boolean(btreeBalance < BigInt(total))
           }
         >
           Mint
