@@ -33,19 +33,24 @@ function App() {
                     </li>
                     <li className="p-2">
                       <a className="text-black no-underline hover:underline hover:text-green-700" 
-                        href="/codeofethics">Purchase BTREE</a>
+                        target="_blank" 
+                        rel="noreferrer"
+                        href="https://app.uniswap.org/#/swap?inputCurrency=0x6bdde71cf0c751eb6d5edb8418e43d3d9427e436&outputCurrency=ETH&use=V2">Purchase BTREE</a>
                     </li>
                     <li className="p-2">
                       <a className="text-black no-underline hover:underline hover:text-green-700" 
-                        href="/codeofethics">BTREE Contract</a>
+                        target="_blank" 
+                        rel="noreferrer"
+                        href="https://etherscan.io/token/0x6bDdE71Cf0C751EB6d5EdB8418e43D3d9427e436#code">BTREE Contract</a>
                     </li>
                     <li className="p-2">
                       <a className="text-black no-underline hover:underline hover:text-green-700" 
-                        href="/codeofethics">Mint B-GOV</a>
+                        href="/mint">Mint B-GOV</a>
                     </li>
                     <li className="p-2">
                       <a className="text-black no-underline hover:underline hover:text-green-700" 
-                        href="/codeofethics">B-GOV Contract</a>
+                        href="#"></a>
+                        B-GOV Contract
                     </li>
                   </ul>
                 </div>
@@ -54,9 +59,7 @@ function App() {
                   <ul className="max-w-md space-y-1 text-gray-400 list-disc list-inside dark:text-gray-400 ">
                     <li className="p-2">
                       <a className="text-black no-underline hover:underline hover:text-green-700" 
-                        target="_blank" 
-                        rel="noreferrer"
-                        href="https://docs.google.com/document/d/1ncY1zhrYFzpAh9hrSqCmO6z3dftXTfWV1RXHGHrTwlQ/edit">
+                        href="/codeofconduct">
                         Code of Conduct
                       </a>  
                     </li>
@@ -64,7 +67,7 @@ function App() {
                       <a className="text-black no-underline hover:underline hover:text-green-700" 
                         target="_blank" 
                         rel="noreferrer"
-                        href="https://docs.google.com/drawings/d/1_AYqj8boh7o8d_CrhSbSUtlvrs0fpTOUEIOxqGd_s58/">
+                        href="https://twitter.com/bittrees_">
                         Twitter
                       </a>
                     </li>
@@ -72,7 +75,7 @@ function App() {
                       <a className="text-black no-underline hover:underline hover:text-green-700" 
                         target="_blank" 
                         rel="noreferrer"
-                        href="https://guild.xyz/bittrees-research">
+                        href="https://t.me/BittreesCommunity">
                         Telegram
                       </a>
                     </li>
@@ -80,23 +83,19 @@ function App() {
                       <a className="text-black no-underline hover:underline hover:text-green-700" 
                         target="_blank" 
                         rel="noreferrer"
-                        href="https://twitter.com/BittreesR">Become a Contributor</a>
+                        href="https://docs.google.com/forms/d/e/1FAIpQLSda4_d_dRSMCPG-LuXaloZ5e4Zs07-6SyzVOQF0MYpOfZGF8g/viewform">Become a Contributor</a>
                     </li>
                     <li className="p-2">
                       <a className="text-black no-underline hover:underline hover:text-green-700" 
-                        target="_blank" 
-                        rel="noreferrer"
-                        href="https://paragraph.xyz/@bittrees_research">
+                        href="#"></a>
                         Governance Forum
-                      </a>
+                      
                     </li>
                     <li className="p-2">
                       <a className="text-black no-underline hover:underline hover:text-green-700" 
-                        target="_blank" 
-                        rel="noreferrer"
-                        href="https://paragraph.xyz/@bittrees_research">
+                        href="#"></a>
                         Snapshot
-                      </a>
+                      
                     </li>
                   </ul>
                 </div>
