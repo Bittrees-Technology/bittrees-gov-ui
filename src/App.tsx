@@ -45,12 +45,12 @@ function App() {
                     </li>
                     <li className="p-2">
                       <a className="text-black no-underline hover:underline hover:text-green-700" 
-                        href="/mint">Mint B-GOV</a>
+                        href="/mint">Mint BGOV</a>
                     </li>
                     <li className="p-2">
                       <a className="text-black no-underline hover:underline hover:text-green-700" 
                         href="#"></a>
-                        B-GOV Contract
+                        BGOV Contract
                     </li>
                   </ul>
                 </div>
