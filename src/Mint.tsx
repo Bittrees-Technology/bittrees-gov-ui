@@ -3,6 +3,8 @@ import {
   usePrepareContractWrite,
   useContractWrite,
   useContractReads,
+  useWaitForTransaction,
+  Address,
 } from "wagmi";
 import abi from "./abi.json";
 import btreeAbi from "./abi-btree.json";
@@ -57,7 +59,7 @@ export function Mint() {
     address: CONTRACT_ADDRESS,
     abi,
     functionName: "mint",
-    chainId: chainId,
+    chainId,
     args: [0x0, address, mintCount], // 0x0 is BTREE
   });
   const { isLoading, write } = useContractWrite(config);
@@ -70,14 +72,31 @@ export function Mint() {
     address: BTREE_CONTRACT_ADDRESS,
     abi: btreeAbi,
     functionName: "increaseAllowance",
-    chainId: chainId,
-    args: [CONTRACT_ADDRESS, total.toString()],
+    chainId,
+    args: [CONTRACT_ADDRESS, (total - allowance).toString()],
   });
-  const { write: writeAllowance } = useContractWrite(configAllowance);
+
+  const [allowanceHash, setAllowanceHash] = useState<Address | undefined>();
+
+  const {
+    data: allowanceData,
+    isLoading: isLoadingAllowance,
+    write: writeAllowance,
+  } = useContractWrite(configAllowance);
 
   function onClickAllowance() {
     writeAllowance?.();
   }
+
+  useEffect(() => {
+    console.log(
+      "allowanceData",
+      allowanceData,
+      "blockHash",
+      allowanceData?.hash
+    );
+    setAllowanceHash(allowanceData?.hash);
+  }, [allowanceData]);
 
   const { data: btreeData, isLoading: btreeIsLoading } = useContractReads({
     contracts: [
@@ -104,6 +123,26 @@ export function Mint() {
         setBtreeBalance(ethers.BigNumber.from(btreeData[1]).toBigInt());
     }
   }, [btreeData]);
+
+  const {
+    isLoading: isWaitingForAllowanceTransaction,
+    data: dataForAllowanceTransaction,
+  } = useWaitForTransaction({
+    hash: allowanceHash,
+    chainId,
+    enabled: Boolean(allowanceHash),
+    confirmations: 5,
+  });
+
+  console.log({
+    isWaitingForAllowanceTransaction,
+    dataForAllowanceTransaction,
+    allowanceHash,
+  });
+
+  useEffect(() => {
+    console.log("refresh UI, transaction successful");
+  }, [dataForAllowanceTransaction]);
 
   const displayMintPrice = parseInt(
     ethers.utils.formatEther(mintPrice),
@@ -205,9 +244,19 @@ export function Mint() {
         </div>
       )}
 
+      {/* TODO:
+  - [ ] create a display variable that determines when to display/disable Allowance button
+  - [ ] refresh users allowance in UI (which should increase after allowance transaction is successful)
+  - [ ] split hook logic into multiple hooks for maintainability
+  - [ ] add similar logic for detecting successful mint transaction and updating UI
+  */}
       <div className="mt-4 font-newtimesroman">
-        {!enoughAllowanceToMint && (
-          <button className="btn btn-primary" onClick={onClickAllowance}>
+        {!enoughAllowanceToMint && !dataForAllowanceTransaction && (
+          <button
+            className="btn btn-primary"
+            onClick={onClickAllowance}
+            // disabled={dataForAllowanceTransaction}
+          >
             Step 1: Grant permission to transfer {displayAllowanceToCreate}{" "}
             BTREE
           </button>
@@ -225,7 +274,10 @@ export function Mint() {
         {!address && (
           <p className="text-2xl mt-4">Please connect your wallet.</p>
         )}
-        {isLoading && <p className="text-2xl mt-4">Minting...</p>}
+        {isLoadingAllowance && (
+          <p className="text-2xl mt-4 font-bold">Granting BTREE allowance...</p>
+        )}
+        {isLoading && <p className="text-2xl mt-4 font-bold">Minting...</p>}
       </div>
     </>
   );
