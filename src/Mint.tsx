@@ -62,6 +62,21 @@ export function Mint() {
     write?.();
   }
 
+  const { config: configAllowance, error: errorAllowance } =
+    usePrepareContractWrite({
+      address: BTREE_CONTRACT_ADDRESS,
+      abi: btreeAbi,
+      functionName: "increaseAllowance",
+      chainId: chainId,
+      args: [CONTRACT_ADDRESS, total.toString()],
+    });
+  const { isLoading: isLoadingAllowance, write: writeAllowance } =
+    useContractWrite(configAllowance);
+
+  function onClickAllowance() {
+    writeAllowance?.();
+  }
+
   const { data: btreeData, isLoading: btreeIsLoading } = useContractReads({
     contracts: [
       {
@@ -79,8 +94,6 @@ export function Mint() {
     ],
   });
 
-  console.log({ btreeData });
-
   useEffect(() => {
     if (btreeData) {
       setAllowance(ethers.BigNumber.from(btreeData[0]).toBigInt());
@@ -88,14 +101,35 @@ export function Mint() {
     }
   }, [btreeData]);
 
+  const displayMintPrice = parseInt(
+    ethers.utils.formatEther(mintPrice),
+    10
+  ).toLocaleString();
+  const displayTotalPrice = parseInt(
+    ethers.utils.formatEther(total),
+    10
+  ).toLocaleString();
+  const displayBtreeBalance = parseInt(
+    ethers.utils.formatEther(btreeBalance),
+    10
+  ).toLocaleString();
+  const displayBtreeAllowance = parseInt(
+    ethers.utils.formatEther(allowance),
+    10
+  ).toLocaleString();
+  const displayAllowanceToCreate = parseInt(
+    ethers.utils.formatEther(total - allowance),
+    10
+  ).toLocaleString();
+
+  const enoughAllowanceToMint = Boolean(allowance >= total);
+  const notEnoughBtreeToMint = Boolean(btreeBalance < total);
+
   return (
     <>
       <div className="grid grid-cols-2 gap-6 justify-start font-newtimesroman">
         <div className="text-right">Cost per BGOV token:</div>
-        <div className="text-left">
-          {parseInt(ethers.utils.formatEther(mintPrice), 10).toLocaleString()}{" "}
-          BTREE
-        </div>
+        <div className="text-left">{displayMintPrice} BTREE</div>
         <div className="text-right">Number of tokens to mint:</div>
         <div className="text-left">
           <input
@@ -109,8 +143,7 @@ export function Mint() {
         </div>
         <div className="text-right">Total price:</div>
         <div className="text-left">
-          {parseInt(ethers.utils.formatEther(total), 10).toLocaleString()}{" "}
-          <span>BTREE</span>
+          {displayTotalPrice} <span>BTREE</span>
         </div>
       </div>
       {btreeIsLoading && (
@@ -122,13 +155,8 @@ export function Mint() {
         <div className="mt-6 font-newtimesroman w-1/2 mx-auto">
           <p className="text-xl underline">Your BTREE Holdings</p>
           <p className="mt-2">
-            Your BTREE holdings are{" "}
-            {parseInt(
-              ethers.utils.formatEther(btreeBalance),
-              10
-            ).toLocaleString()}
-            .{" "}
-            {btreeBalance < BigInt(total) && (
+            Your BTREE holdings are {displayBtreeBalance}.{" "}
+            {notEnoughBtreeToMint && (
               <span className="font-bold text-red-500">
                 Note that your wallet does not have enough BTREE tokens to mint{" "}
                 {mintCount} BGOV tokens.
@@ -137,14 +165,7 @@ export function Mint() {
           </p>
           <p className="mt-2">
             The allowance of BTREE you've granted for minting is{" "}
-            {parseInt(ethers.utils.formatEther(allowance), 10).toLocaleString()}
-            .{" "}
-            {allowance < BigInt(total) && (
-              <span className="font-bold">
-                When you mint, the first transaction will be to grant an
-                allowance.
-              </span>
-            )}
+            {displayBtreeAllowance}.
           </p>
         </div>
       )}
@@ -159,7 +180,7 @@ export function Mint() {
         </p>
       </div>
 
-      {error && (
+      {enoughAllowanceToMint && error && (
         <div className="m-4 mx-auto max-w-xl font-newtimesroman font-bold text-lg text-red-500">
           An error occurred preparing the transaction:{" "}
           {displayFriendlyError(error.message)}
@@ -167,17 +188,21 @@ export function Mint() {
       )}
 
       <div className="mt-4 font-newtimesroman">
-        <button
-          className="btn btn-primary"
-          onClick={onClick}
-          disabled={
-            !Boolean(address) ||
-            Boolean(error) ||
-            Boolean(btreeBalance < BigInt(total))
-          }
-        >
-          Mint
-        </button>
+        {!enoughAllowanceToMint && (
+          <button className="btn btn-primary" onClick={onClickAllowance}>
+            Step 1: Grant permission to transfer {displayAllowanceToCreate}{" "}
+            BTREE
+          </button>
+        )}
+        {enoughAllowanceToMint && (
+          <button
+            className="btn btn-primary"
+            onClick={onClick}
+            disabled={!Boolean(write) || notEnoughBtreeToMint}
+          >
+            Step 2: Mint BGOV
+          </button>
+        )}
 
         {!address && (
           <p className="text-2xl mt-4">Please connect your wallet.</p>
