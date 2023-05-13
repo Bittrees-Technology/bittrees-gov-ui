@@ -2,7 +2,6 @@ import {
   useAccount,
   usePrepareContractWrite,
   useContractWrite,
-  useContractReads,
   useWaitForTransaction,
   Address,
 } from "wagmi";
@@ -14,6 +13,7 @@ import {
 } from "wagmi/chains";
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
+import { useBtreeInformation } from "./useBtreeInformation";
 
 const CONTRACT_ADDRESS = "0x81Ed0A98c0BD6A75240fD4F65E5e2c43d7b343D9";
 const BTREE_CONTRACT_ADDRESS = "0x1Ca23BB7dca2BEa5F57552AE99C3A44fA7307B5f";
@@ -43,17 +43,22 @@ function displayFriendlyError(message: string | undefined): string {
 
 export function Mint() {
   const [mintCount, setMintcount] = useState(1);
-  const [allowance, setAllowance] = useState<bigint>(BigInt(0));
-  const [btreeBalance, setBtreeBalance] = useState<bigint>(BigInt(0));
+  // const [allowance, setAllowance] = useState<bigint>(BigInt(0));
+  // const [btreeBalance, setBtreeBalance] = useState<bigint>(BigInt(0));
   const [total, setTotal] = useState<bigint>(mintPrice);
+
+  const { address } = useAccount();
+  const { btreeAllowance, btreeBalance, btreeIsLoading } = useBtreeInformation({
+    walletAddress: address,
+    CONTRACT_ADDRESS,
+    BTREE_CONTRACT_ADDRESS,
+  });
 
   function calcTotal(count: string) {
     setMintcount(parseInt(count, 10));
     const totalEther = mintPrice * BigInt(parseInt(count ? count : "0", 10));
     setTotal(totalEther);
   }
-
-  const { address } = useAccount();
 
   const { config, error } = usePrepareContractWrite({
     address: CONTRACT_ADDRESS,
@@ -73,7 +78,7 @@ export function Mint() {
     abi: btreeAbi,
     functionName: "increaseAllowance",
     chainId,
-    args: [CONTRACT_ADDRESS, (total - allowance).toString()],
+    args: [CONTRACT_ADDRESS, (total - btreeAllowance).toString()],
   });
 
   const [allowanceHash, setAllowanceHash] = useState<Address | undefined>();
@@ -97,32 +102,6 @@ export function Mint() {
     );
     setAllowanceHash(allowanceData?.hash);
   }, [allowanceData]);
-
-  const { data: btreeData, isLoading: btreeIsLoading } = useContractReads({
-    contracts: [
-      {
-        address: BTREE_CONTRACT_ADDRESS,
-        abi: btreeAbi,
-        functionName: "allowance",
-        args: [address, CONTRACT_ADDRESS],
-      },
-      {
-        address: BTREE_CONTRACT_ADDRESS,
-        abi: btreeAbi,
-        functionName: "balanceOf",
-        args: [address],
-      },
-    ],
-  });
-
-  useEffect(() => {
-    if (btreeData) {
-      if (btreeData[0])
-        setAllowance(ethers.BigNumber.from(btreeData[0]).toBigInt());
-      if (btreeData[1])
-        setBtreeBalance(ethers.BigNumber.from(btreeData[1]).toBigInt());
-    }
-  }, [btreeData]);
 
   const {
     isLoading: isWaitingForAllowanceTransaction,
@@ -157,15 +136,15 @@ export function Mint() {
     10
   ).toLocaleString();
   const displayBtreeAllowance = parseInt(
-    ethers.utils.formatEther(allowance),
+    ethers.utils.formatEther(btreeAllowance),
     10
   ).toLocaleString();
   const displayAllowanceToCreate = parseInt(
-    ethers.utils.formatEther(total - allowance),
+    ethers.utils.formatEther(total - btreeAllowance),
     10
   ).toLocaleString();
 
-  const enoughAllowanceToMint = Boolean(allowance >= total);
+  const enoughAllowanceToMint = Boolean(btreeAllowance >= total);
   const notEnoughBtreeToMint = Boolean(btreeBalance < total);
 
   if (!address) {
