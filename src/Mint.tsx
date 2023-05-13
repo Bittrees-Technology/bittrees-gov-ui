@@ -129,6 +129,14 @@ export function Mint() {
   const enoughAllowanceToMint = Boolean(allowance >= total);
   const notEnoughBtreeToMint = Boolean(btreeBalance < total);
 
+  if (!address) {
+    return (
+      <div className="m-4 text-xl">
+        Please connect your wallet to mint BGOV tokens.
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="grid grid-cols-2 gap-6 justify-start font-newtimesroman">
