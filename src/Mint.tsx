@@ -6,15 +6,19 @@ import {
 } from "wagmi";
 import abi from "./abi.json";
 import btreeAbi from "./abi-btree.json";
-import { goerli, mainnet } from "wagmi/chains";
+import {
+  goerli,
+  // mainnet
+} from "wagmi/chains";
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 
 const CONTRACT_ADDRESS = "0x81Ed0A98c0BD6A75240fD4F65E5e2c43d7b343D9";
 const BTREE_CONTRACT_ADDRESS = "0x1Ca23BB7dca2BEa5F57552AE99C3A44fA7307B5f";
 
-const chainId =
-  process.env.REACT_APP_ENABLE_TESTNETS === "true" ? goerli.id : mainnet.id;
+// const chainId =
+//   process.env.REACT_APP_ENABLE_TESTNETS === "true" ? goerli.id : mainnet.id;
+const chainId = goerli.id;
 
 console.info(`Contract: ${CONTRACT_ADDRESS}`);
 console.info(`Chain ID: ${chainId}`);
@@ -62,16 +66,14 @@ export function Mint() {
     write?.();
   }
 
-  const { config: configAllowance, error: errorAllowance } =
-    usePrepareContractWrite({
-      address: BTREE_CONTRACT_ADDRESS,
-      abi: btreeAbi,
-      functionName: "increaseAllowance",
-      chainId: chainId,
-      args: [CONTRACT_ADDRESS, total.toString()],
-    });
-  const { isLoading: isLoadingAllowance, write: writeAllowance } =
-    useContractWrite(configAllowance);
+  const { config: configAllowance } = usePrepareContractWrite({
+    address: BTREE_CONTRACT_ADDRESS,
+    abi: btreeAbi,
+    functionName: "increaseAllowance",
+    chainId: chainId,
+    args: [CONTRACT_ADDRESS, total.toString()],
+  });
+  const { write: writeAllowance } = useContractWrite(configAllowance);
 
   function onClickAllowance() {
     writeAllowance?.();
@@ -96,8 +98,10 @@ export function Mint() {
 
   useEffect(() => {
     if (btreeData) {
-      setAllowance(ethers.BigNumber.from(btreeData[0]).toBigInt());
-      setBtreeBalance(ethers.BigNumber.from(btreeData[1]).toBigInt());
+      if (btreeData[0])
+        setAllowance(ethers.BigNumber.from(btreeData[0]).toBigInt());
+      if (btreeData[1])
+        setBtreeBalance(ethers.BigNumber.from(btreeData[1]).toBigInt());
     }
   }, [btreeData]);
 
@@ -178,6 +182,12 @@ export function Mint() {
           contract to transfer BTREE tokens on your behalf, the second to do the
           transfer and mint your equity tokens.
         </p>
+      </div>
+
+      <div className="text-2xl text-red-500">
+        This site is on GOERLI testnet and is not live yet.
+        <br />
+        Real BGOV tokens are not mintable yet.
       </div>
 
       {enoughAllowanceToMint && error && (
