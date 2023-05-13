@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom";
 
 function App() {
   return (
@@ -48,8 +47,6 @@ function App() {
                         href="/mint">Mint BGOV</a>
                     </li>
                     <li className="p-2">
-                      <a className="text-black no-underline hover:underline hover:text-green-700" 
-                        href="#"></a>
                         BGOV Contract
                     </li>
                   </ul>
@@ -86,16 +83,10 @@ function App() {
                         href="https://docs.google.com/forms/d/e/1FAIpQLSda4_d_dRSMCPG-LuXaloZ5e4Zs07-6SyzVOQF0MYpOfZGF8g/viewform">Become a Contributor</a>
                     </li>
                     <li className="p-2">
-                      <a className="text-black no-underline hover:underline hover:text-green-700" 
-                        href="#"></a>
                         Governance Forum
-                      
                     </li>
                     <li className="p-2">
-                      <a className="text-black no-underline hover:underline hover:text-green-700" 
-                        href="#"></a>
                         Snapshot
-                      
                     </li>
                   </ul>
                 </div>
