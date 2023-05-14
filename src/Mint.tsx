@@ -47,16 +47,17 @@ function displayFriendlyError(message: string | undefined): string {
 enum MintState {
   NotConnected,
   AllowanceStep,
-  AllowanceStepAwaitTransaction,
+  AllowanceTransactionInProgress,
   MintStep,
-  MintStepAwaitTransaction,
+  MintTransactionInProgress,
 }
 
 export function Mint() {
   const [mintCount, setMintcount] = useState(1);
   const [total, setTotal] = useState<bigint>(mintPrice);
-
   const { address } = useAccount();
+  const [allowanceInProgress, setAllowanceInProgress] = useState(false);
+  const [mintInProgress, setMintInProgress] = useState(false);
 
   const { btreeAllowance, btreeBalance, btreeIsLoading } = useBtreeInformation({
     walletAddress: address,
@@ -77,9 +78,10 @@ export function Mint() {
     chainId,
     args: [0x0, address, mintCount], // 0x0 is BTREE
   });
-  const { isLoading, write } = useContractWrite(config);
+  const { write } = useContractWrite(config);
 
   function onClick() {
+    setMintInProgress(true);
     write?.();
   }
 
@@ -95,11 +97,12 @@ export function Mint() {
 
   const {
     // data: allowanceData,
-    isLoading: isLoadingAllowance,
+    // isLoading: isLoadingAllowance,
     write: writeAllowance,
   } = useContractWrite(configAllowance);
 
   function onClickAllowance() {
+    setAllowanceInProgress(true);
     writeAllowance?.();
   }
 
@@ -159,7 +162,11 @@ export function Mint() {
 
   let mintState = MintState.NotConnected;
   if (address) {
-    if (enoughAllowanceToMint) {
+    if (allowanceInProgress) {
+      mintState = MintState.AllowanceTransactionInProgress;
+    } else if (mintInProgress) {
+      mintState = MintState.MintTransactionInProgress;
+    } else if (enoughAllowanceToMint) {
       mintState = MintState.MintStep;
     } else {
       mintState = MintState.AllowanceStep;
@@ -167,6 +174,7 @@ export function Mint() {
   }
 
   console.log("debug", {
+    mintState,
     enoughAllowanceToMint,
     notEnoughBtreeToMint,
   });
@@ -275,10 +283,13 @@ export function Mint() {
           </button>
         )}
 
-        {isLoadingAllowance && (
+        {mintState === MintState.AllowanceTransactionInProgress && (
           <p className="text-2xl mt-4 font-bold">Granting BTREE allowance...</p>
         )}
-        {isLoading && <p className="text-2xl mt-4 font-bold">Minting...</p>}
+
+        {mintState === MintState.MintTransactionInProgress && (
+          <p className="text-2xl mt-4 font-bold">Minting BGOV token(s)...</p>
+        )}
       </div>
     </>
   );
