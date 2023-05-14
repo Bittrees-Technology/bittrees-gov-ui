@@ -39,7 +39,7 @@ export function useBtreeInformation({
     }
 
     if (btreeData && btreeData[1]) {
-        setBtreeBalance(ethers.BigNumber.from(btreeData[0]).toBigInt());
+        setBtreeBalance(ethers.BigNumber.from(btreeData[1]).toBigInt());
       }
 }, [btreeData]);
 
