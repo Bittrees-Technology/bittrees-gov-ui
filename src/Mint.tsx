@@ -1,22 +1,13 @@
-import {
-  useAccount,
-  usePrepareContractWrite,
-  useContractWrite,
-  // useWaitForTransaction,
-  // Address,
-} from "wagmi";
+import { useAccount, usePrepareContractWrite, useContractWrite } from "wagmi";
 import abi from "./abi.json";
-import btreeAbi from "./abi-btree.json";
 import {
   goerli,
   // mainnet
 } from "wagmi/chains";
-import {
-  useState,
-  // useEffect
-} from "react";
+import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import { useBtreeInformation } from "./useBtreeInformation";
+import { useManageAllowanceTransaction } from "./useManageAllowanceTransaction";
 
 const CONTRACT_ADDRESS = "0x81Ed0A98c0BD6A75240fD4F65E5e2c43d7b343D9";
 const BTREE_CONTRACT_ADDRESS = "0x1Ca23BB7dca2BEa5F57552AE99C3A44fA7307B5f";
@@ -30,19 +21,19 @@ console.info(`Chain ID: ${chainId}`);
 
 const mintPrice = ethers.utils.parseUnits("1000.0", "ether").toBigInt();
 
-function displayFriendlyError(message: string | undefined): string {
-  if (!message) return "";
+// function displayFriendlyError(message: string | undefined): string {
+//   if (!message) return "";
 
-  if (message.startsWith("insufficient funds for intrinsic transaction cost")) {
-    return "insufficient funds for intrinsic transaction cost.";
-  }
+//   if (message.startsWith("insufficient funds for intrinsic transaction cost")) {
+//     return "insufficient funds for intrinsic transaction cost.";
+//   }
 
-  if (message.includes("Insufficient allowance")) {
-    return "insufficient allowance. This wallet hasn't granted permissions to the contract to transfer BTREE tokens.";
-  }
+//   if (message.includes("Insufficient allowance")) {
+//     return "insufficient allowance. This wallet hasn't granted permissions to the contract to transfer BTREE tokens.";
+//   }
 
-  return message;
-}
+//   return message;
+// }
 
 enum MintState {
   NotConnected,
@@ -71,7 +62,8 @@ export function Mint() {
     setTotal(totalEther);
   }
 
-  const { config, error } = usePrepareContractWrite({
+  // const { config, error } = usePrepareContractWrite({
+  const { config } = usePrepareContractWrite({
     address: CONTRACT_ADDRESS,
     abi,
     functionName: "mint",
@@ -85,56 +77,31 @@ export function Mint() {
     write?.();
   }
 
-  const { config: configAllowance } = usePrepareContractWrite({
-    address: BTREE_CONTRACT_ADDRESS,
-    abi: btreeAbi,
-    functionName: "increaseAllowance",
-    chainId,
-    args: [CONTRACT_ADDRESS, (total - btreeAllowance).toString()],
-  });
-
-  // const [allowanceHash, setAllowanceHash] = useState<Address | undefined>();
-
-  const {
-    // data: allowanceData,
-    // isLoading: isLoadingAllowance,
-    write: writeAllowance,
-  } = useContractWrite(configAllowance);
+  const { sendAllowance, allowanceTransactionResult } =
+    useManageAllowanceTransaction({
+      BTREE_CONTRACT_ADDRESS,
+      CONTRACT_ADDRESS,
+      chainId,
+      amount: total - btreeAllowance < 0 ? BigInt(0) : total - btreeAllowance,
+    });
 
   function onClickAllowance() {
     setAllowanceInProgress(true);
-    writeAllowance?.();
+    sendAllowance();
   }
 
-  // useEffect(() => {
-  //   console.log(
-  //     "allowanceData",
-  //     allowanceData,
-  //     "blockHash",
-  //     allowanceData?.hash
-  //   );
-  //   setAllowanceHash(allowanceData?.hash);
-  // }, [allowanceData]);
-
-  // const {
-  //   isLoading: isWaitingForAllowanceTransaction,
-  //   data: dataForAllowanceTransaction,
-  // } = useWaitForTransaction({
-  //   hash: allowanceHash,
-  //   chainId,
-  //   enabled: Boolean(allowanceHash),
-  //   confirmations: 5,
-  // });
-
-  // console.log({
-  //   isWaitingForAllowanceTransaction,
-  //   dataForAllowanceTransaction,
-  //   allowanceHash,
-  // });
-
-  // useEffect(() => {
-  //   console.log("refresh UI, transaction successful");
-  // }, [dataForAllowanceTransaction]);
+  useEffect(() => {
+    console.log(
+      "refresh UI, transaction successful. allowanceTransactionResult:",
+      allowanceTransactionResult,
+      "plus",
+      {
+        btreeAllowance,
+        total,
+      }
+    );
+    setAllowanceInProgress(false);
+  }, [allowanceTransactionResult, btreeAllowance, total]);
 
   const displayMintPrice = parseInt(
     ethers.utils.formatEther(mintPrice),
@@ -166,18 +133,12 @@ export function Mint() {
       mintState = MintState.AllowanceTransactionInProgress;
     } else if (mintInProgress) {
       mintState = MintState.MintTransactionInProgress;
-    } else if (enoughAllowanceToMint) {
+    } else if (enoughAllowanceToMint || allowanceTransactionResult) {
       mintState = MintState.MintStep;
     } else {
       mintState = MintState.AllowanceStep;
     }
   }
-
-  console.log("debug", {
-    mintState,
-    enoughAllowanceToMint,
-    notEnoughBtreeToMint,
-  });
 
   if (mintState === MintState.NotConnected) {
     return (
@@ -232,7 +193,7 @@ export function Mint() {
             {notEnoughBtreeToMint && (
               <span className="font-bold text-red-500">
                 Note that your wallet does not have enough BTREE tokens to mint{" "}
-                {mintCount} BGOV tokens.
+                {mintCount} BGOV token{mintCount > 0 ? "s" : ""}.
               </span>
             )}
           </p>
@@ -254,15 +215,14 @@ export function Mint() {
       </div>
 
       {/* only display error if there is enough btree, but something else went wrong */}
-      {mintState === MintState.MintStep && error && !notEnoughBtreeToMint && (
+      {/* {mintState === MintState.MintStep && error && !notEnoughBtreeToMint && (
         <div className="m-4 mx-auto max-w-xl font-newtimesroman font-bold text-lg text-red-500">
           An error occurred preparing the transaction:{" "}
           {displayFriendlyError(error.message)}
         </div>
-      )}
+      )} */}
 
       <div className="mt-4 font-newtimesroman">
-        {/* {!enoughAllowanceToMint && !dataForAllowanceTransaction && ( */}
         {mintState === MintState.AllowanceStep && (
           <button
             className="btn btn-primary"
@@ -273,6 +233,7 @@ export function Mint() {
             BTREE
           </button>
         )}
+
         {mintState === MintState.MintStep && (
           <button
             className="btn btn-primary"
@@ -284,11 +245,38 @@ export function Mint() {
         )}
 
         {mintState === MintState.AllowanceTransactionInProgress && (
-          <p className="text-2xl mt-4 font-bold">Granting BTREE allowance...</p>
+          <div className="mt-4">
+            <div
+              className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]"
+              role="status"
+            >
+              <span className="!absolute !-m-px !h-px !w-px !overflow-hidden !whitespace-nowrap !border-0 !p-0 ![clip:rect(0,0,0,0)]">
+                Loading...
+              </span>
+            </div>
+            <p className="text-2xl mt-2 font-bold">
+              Granting BTREE allowance. After you accept transaction, soon this
+              button will change to the Mint BGOV step once allowance has
+              completed...
+            </p>
+          </div>
         )}
 
         {mintState === MintState.MintTransactionInProgress && (
-          <p className="text-2xl mt-4 font-bold">Minting BGOV token(s)...</p>
+          <div className="mt-4">
+            <div
+              className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]"
+              role="status"
+            >
+              <span className="!absolute !-m-px !h-px !w-px !overflow-hidden !whitespace-nowrap !border-0 !p-0 ![clip:rect(0,0,0,0)]">
+                Loading...
+              </span>
+            </div>
+            <p className="text-2xl mt-2 font-bold">
+              Minting BGOV. After wallet pops up and you accept transaction,
+              please be patient while minting...
+            </p>
+          </div>
         )}
       </div>
     </>
