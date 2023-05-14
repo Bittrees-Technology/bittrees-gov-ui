@@ -41,6 +41,7 @@ enum MintState {
   AllowanceTransactionInProgress,
   MintStep,
   MintTransactionInProgress,
+  MintComplete,
 }
 
 export function Mint() {
@@ -49,6 +50,7 @@ export function Mint() {
   const { address } = useAccount();
   const [allowanceInProgress, setAllowanceInProgress] = useState(false);
   const [mintInProgress, setMintInProgress] = useState(false);
+  const [mintComplete, setMintComplete] = useState(false);
 
   const { btreeAllowance, btreeBalance, btreeIsLoading } = useBtreeInformation({
     walletAddress: address,
@@ -75,6 +77,9 @@ export function Mint() {
   function onClick() {
     setMintInProgress(true);
     write?.();
+    window.setTimeout(() => {
+      setMintComplete(true);
+    }, 10000);
   }
 
   const { sendAllowance, allowanceTransactionResult } =
@@ -129,7 +134,9 @@ export function Mint() {
 
   let mintState = MintState.NotConnected;
   if (address) {
-    if (allowanceInProgress) {
+    if (mintComplete) {
+      mintState = MintState.MintComplete;
+    } else if (allowanceInProgress) {
       mintState = MintState.AllowanceTransactionInProgress;
     } else if (mintInProgress) {
       mintState = MintState.MintTransactionInProgress;
@@ -238,7 +245,12 @@ export function Mint() {
           <button
             className="btn btn-primary"
             onClick={onClick}
-            disabled={!Boolean(write) || notEnoughBtreeToMint}
+            disabled={
+              !Boolean(write) ||
+              notEnoughBtreeToMint ||
+              mintInProgress ||
+              mintComplete
+            }
           >
             Step 2: Mint BGOV
           </button>
@@ -277,6 +289,12 @@ export function Mint() {
               please be patient while minting...
             </p>
           </div>
+        )}
+
+        {mintState === MintState.MintComplete && (
+          <p className="text-2xl mt-2 font-bold">
+            Mint should now be complete.
+          </p>
         )}
       </div>
     </>
