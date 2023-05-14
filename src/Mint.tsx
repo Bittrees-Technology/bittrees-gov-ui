@@ -2,8 +2,8 @@ import {
   useAccount,
   usePrepareContractWrite,
   useContractWrite,
-  useWaitForTransaction,
-  Address,
+  // useWaitForTransaction,
+  // Address,
 } from "wagmi";
 import abi from "./abi.json";
 import btreeAbi from "./abi-btree.json";
@@ -11,7 +11,10 @@ import {
   goerli,
   // mainnet
 } from "wagmi/chains";
-import { useState, useEffect } from "react";
+import {
+  useState,
+  // useEffect
+} from "react";
 import { ethers } from "ethers";
 import { useBtreeInformation } from "./useBtreeInformation";
 
@@ -41,13 +44,20 @@ function displayFriendlyError(message: string | undefined): string {
   return message;
 }
 
+enum MintState {
+  NotConnected,
+  AllowanceStep,
+  AllowanceStepAwaitTransaction,
+  MintStep,
+  MintStepAwaitTransaction,
+}
+
 export function Mint() {
   const [mintCount, setMintcount] = useState(1);
-  // const [allowance, setAllowance] = useState<bigint>(BigInt(0));
-  // const [btreeBalance, setBtreeBalance] = useState<bigint>(BigInt(0));
   const [total, setTotal] = useState<bigint>(mintPrice);
 
   const { address } = useAccount();
+
   const { btreeAllowance, btreeBalance, btreeIsLoading } = useBtreeInformation({
     walletAddress: address,
     CONTRACT_ADDRESS,
@@ -81,10 +91,10 @@ export function Mint() {
     args: [CONTRACT_ADDRESS, (total - btreeAllowance).toString()],
   });
 
-  const [allowanceHash, setAllowanceHash] = useState<Address | undefined>();
+  // const [allowanceHash, setAllowanceHash] = useState<Address | undefined>();
 
   const {
-    data: allowanceData,
+    // data: allowanceData,
     isLoading: isLoadingAllowance,
     write: writeAllowance,
   } = useContractWrite(configAllowance);
@@ -93,35 +103,35 @@ export function Mint() {
     writeAllowance?.();
   }
 
-  useEffect(() => {
-    console.log(
-      "allowanceData",
-      allowanceData,
-      "blockHash",
-      allowanceData?.hash
-    );
-    setAllowanceHash(allowanceData?.hash);
-  }, [allowanceData]);
+  // useEffect(() => {
+  //   console.log(
+  //     "allowanceData",
+  //     allowanceData,
+  //     "blockHash",
+  //     allowanceData?.hash
+  //   );
+  //   setAllowanceHash(allowanceData?.hash);
+  // }, [allowanceData]);
 
-  const {
-    isLoading: isWaitingForAllowanceTransaction,
-    data: dataForAllowanceTransaction,
-  } = useWaitForTransaction({
-    hash: allowanceHash,
-    chainId,
-    enabled: Boolean(allowanceHash),
-    confirmations: 5,
-  });
+  // const {
+  //   isLoading: isWaitingForAllowanceTransaction,
+  //   data: dataForAllowanceTransaction,
+  // } = useWaitForTransaction({
+  //   hash: allowanceHash,
+  //   chainId,
+  //   enabled: Boolean(allowanceHash),
+  //   confirmations: 5,
+  // });
 
-  console.log({
-    isWaitingForAllowanceTransaction,
-    dataForAllowanceTransaction,
-    allowanceHash,
-  });
+  // console.log({
+  //   isWaitingForAllowanceTransaction,
+  //   dataForAllowanceTransaction,
+  //   allowanceHash,
+  // });
 
-  useEffect(() => {
-    console.log("refresh UI, transaction successful");
-  }, [dataForAllowanceTransaction]);
+  // useEffect(() => {
+  //   console.log("refresh UI, transaction successful");
+  // }, [dataForAllowanceTransaction]);
 
   const displayMintPrice = parseInt(
     ethers.utils.formatEther(mintPrice),
@@ -147,16 +157,41 @@ export function Mint() {
   const enoughAllowanceToMint = Boolean(btreeAllowance >= total);
   const notEnoughBtreeToMint = Boolean(btreeBalance < total);
 
-  if (!address) {
+  let mintState = MintState.NotConnected;
+  if (address) {
+    if (enoughAllowanceToMint) {
+      mintState = MintState.MintStep;
+    } else {
+      mintState = MintState.AllowanceStep;
+    }
+  }
+
+  console.log("debug", {
+    enoughAllowanceToMint,
+    notEnoughBtreeToMint,
+  });
+
+  if (mintState === MintState.NotConnected) {
     return (
-      <div className="m-4 text-xl">
-        Please connect your wallet to mint BGOV tokens.
+      <div>
+        {chainId === goerli.id && (
+          <div className="text-2xl text-red-500 p-4">
+            This site is on testnet. Real BGOV tokens are not mintable yet.
+          </div>
+        )}
+
+        <p className="text-2xl mt-4">Please connect your wallet.</p>
       </div>
     );
   }
 
   return (
     <>
+      {chainId === goerli.id && (
+        <div className="text-2xl text-red-500 p-4">
+          This site is on testnet. Real BGOV tokens are not mintable yet.{" "}
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-6 justify-start font-newtimesroman">
         <div className="text-right">Cost per BGOV token:</div>
         <div className="text-left">{displayMintPrice} BTREE</div>
@@ -210,27 +245,17 @@ export function Mint() {
         </p>
       </div>
 
-      <div className="text-2xl text-red-500">
-        This site is on GOERLI testnet and is not live yet.
-        <br />
-        Real BGOV tokens are not mintable yet.
-      </div>
-
-      {enoughAllowanceToMint && error && (
+      {/* only display error if there is enough btree, but something else went wrong */}
+      {mintState === MintState.MintStep && error && !notEnoughBtreeToMint && (
         <div className="m-4 mx-auto max-w-xl font-newtimesroman font-bold text-lg text-red-500">
           An error occurred preparing the transaction:{" "}
           {displayFriendlyError(error.message)}
         </div>
       )}
 
-      {/* TODO:
-  - [ ] create a display variable that determines when to display/disable Allowance button
-  - [ ] refresh users allowance in UI (which should increase after allowance transaction is successful)
-  - [ ] split hook logic into multiple hooks for maintainability
-  - [ ] add similar logic for detecting successful mint transaction and updating UI
-  */}
       <div className="mt-4 font-newtimesroman">
-        {!enoughAllowanceToMint && !dataForAllowanceTransaction && (
+        {/* {!enoughAllowanceToMint && !dataForAllowanceTransaction && ( */}
+        {mintState === MintState.AllowanceStep && (
           <button
             className="btn btn-primary"
             onClick={onClickAllowance}
@@ -240,7 +265,7 @@ export function Mint() {
             BTREE
           </button>
         )}
-        {enoughAllowanceToMint && (
+        {mintState === MintState.MintStep && (
           <button
             className="btn btn-primary"
             onClick={onClick}
@@ -250,9 +275,6 @@ export function Mint() {
           </button>
         )}
 
-        {!address && (
-          <p className="text-2xl mt-4">Please connect your wallet.</p>
-        )}
         {isLoadingAllowance && (
           <p className="text-2xl mt-4 font-bold">Granting BTREE allowance...</p>
         )}
