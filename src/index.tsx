@@ -12,12 +12,17 @@ import { getDefaultWallets, RainbowKitProvider } from "@rainbow-me/rainbowkit";
 import { EthereumClient } from "@web3modal/ethereum";
 import { Web3Modal } from "@web3modal/react";
 import { configureChains, createClient, WagmiConfig } from "wagmi";
-import { mainnet, goerli } from "wagmi/chains";
+import {
+  // mainnet,
+  goerli,
+} from "wagmi/chains";
 import { alchemyProvider } from "wagmi/providers/alchemy";
 import { publicProvider } from "wagmi/providers/public";
 
-const myChain =
-  process.env.REACT_APP_ENABLE_TESTNETS === "true" ? goerli : mainnet;
+// const myChain =
+//   process.env.REACT_APP_ENABLE_TESTNETS === "true" ? goerli : mainnet;
+
+const myChain = goerli;
 
 const { chains, provider, webSocketProvider } = configureChains(
   [myChain],
@@ -28,7 +33,7 @@ const { chains, provider, webSocketProvider } = configureChains(
 );
 
 const { connectors } = getDefaultWallets({
-  appName: "Bittrees Research",
+  appName: "Bittrees Governance",
   chains,
 });
 
