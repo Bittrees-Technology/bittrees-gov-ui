@@ -47,7 +47,7 @@ function App() {
                     <li className="p-2">
                       <a
                         className="text-black no-underline hover:underline hover:text-green-700"
-                        href="/mint/bgov"
+                        href="/mint"
                       >
                         Mint BGOV
                       </a>
