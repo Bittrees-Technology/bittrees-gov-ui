@@ -150,12 +150,6 @@ export function Mint() {
   if (mintState === MintState.NotConnected) {
     return (
       <div>
-        {chainId === goerli.id && (
-          <div className="text-2xl text-red-500 p-4">
-            This site is on testnet. Real BGOV tokens are not mintable yet.
-          </div>
-        )}
-
         <p className="text-2xl mt-4">Please connect your wallet.</p>
       </div>
     );
@@ -163,11 +157,6 @@ export function Mint() {
 
   return (
     <>
-      {chainId === goerli.id && (
-        <div className="text-2xl text-red-500 p-4">
-          This site is on testnet. Real BGOV tokens are not mintable yet.{" "}
-        </div>
-      )}
       <div className="grid grid-cols-2 gap-6 justify-start font-newtimesroman">
         <div className="text-right">Cost per BGOV token:</div>
         <div className="text-left">{displayMintPrice} BTREE</div>
