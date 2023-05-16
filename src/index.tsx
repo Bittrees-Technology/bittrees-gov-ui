@@ -13,8 +13,8 @@ import { EthereumClient } from "@web3modal/ethereum";
 import { Web3Modal } from "@web3modal/react";
 import { configureChains, createClient, WagmiConfig } from "wagmi";
 import {
-  // mainnet,
-  goerli,
+  mainnet,
+  // goerli,
 } from "wagmi/chains";
 import { alchemyProvider } from "wagmi/providers/alchemy";
 import { publicProvider } from "wagmi/providers/public";
@@ -22,7 +22,7 @@ import { publicProvider } from "wagmi/providers/public";
 // const myChain =
 //   process.env.REACT_APP_ENABLE_TESTNETS === "true" ? goerli : mainnet;
 
-const myChain = goerli;
+const myChain = mainnet;
 
 const { chains, provider, webSocketProvider } = configureChains(
   [myChain],
