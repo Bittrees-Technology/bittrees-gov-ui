@@ -9,7 +9,7 @@ import { ethers } from "ethers";
 import { useBtreeInformation } from "./useBtreeInformation";
 import { useManageAllowanceTransaction } from "./useManageAllowanceTransaction";
 
-const CONTRACT_ADDRESS = "0x81Ed0A98c0BD6A75240fD4F65E5e2c43d7b343D9";
+const CONTRACT_ADDRESS = "0x10b127fae74cdd7cebd365fc01d36dfe2e96e0c3";
 const BTREE_CONTRACT_ADDRESS = "0x1Ca23BB7dca2BEa5F57552AE99C3A44fA7307B5f";
 
 // const chainId =
