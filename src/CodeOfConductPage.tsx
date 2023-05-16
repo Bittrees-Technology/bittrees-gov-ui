@@ -3,7 +3,7 @@ import { CodeOfConductContent } from "./CodeOfConductContent";
 function CodeOfConductPage() {
   return (
     <div className="max-w-4xl mx-auto">
-      <header className="border-2 bg-base-100">
+      <header className="border-2 bg-white">
         <div className="w-full">
           <a href="./" className="mx-auto">
             <div className="font-newtimesroman p-32 h-80 pb-0 text-7xl text-center font-bold tracking-wider">
@@ -13,7 +13,7 @@ function CodeOfConductPage() {
         </div>
       </header>
 
-      <main className="text-center bg-base-100 border-2 border-t-0">
+      <main className="text-center bg-white border-2 border-t-0">
         <div className="flex flex-col gap-3 p-4 md:p-12 items-center">
           <div className="mt-4">
             <CodeOfConductContent />

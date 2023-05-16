@@ -4,7 +4,7 @@ import { Mint } from "./Mint";
 function MintPage() {
   return (
     <div className="max-w-4xl mx-auto">
-      <header className="border-2 border-b-0 bg-base-100">
+      <header className="border-2 border-b-0 bg-white">
         <div className="w-full">
           <a href="./" className="mx-auto">
             <div className="font-newtimesroman p-20 pb-0 text-7xl text-center font-bold tracking-wider">
@@ -14,12 +14,15 @@ function MintPage() {
         </div>
       </header>
 
-      <main className="text-center bg-base-100 border-2 border-t-0">
+      <main className="text-center bg-white border-2 border-t-0">
         <div className="flex flex-col gap-3 p-4 md:p-12 items-center">
           <div className="mx-auto flex flex-col items-center max-w-md drop-shadow-xl">
-            <div className="font-newtimesroman p-32 pt-24 pb-24 text-7xl text-center font-bold tracking-wider bg-gray-300 rounded">
-              BGOV
-            </div>
+              <img
+                src="/bgov-cert-sm.png"
+                width="1000px"
+                height="566px"
+                alt="BGOV Certificate of Stock"
+              />
           </div>
           <div className="mt-4">
             <Mint />
