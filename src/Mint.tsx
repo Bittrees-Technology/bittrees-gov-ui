@@ -16,7 +16,8 @@ const BTREE_CONTRACT_ADDRESS = "0x6bDdE71Cf0C751EB6d5EdB8418e43D3d9427e436";
 //   process.env.REACT_APP_ENABLE_TESTNETS === "true" ? goerli.id : mainnet.id;
 const chainId = mainnet.id;
 
-console.info(`Contract: ${CONTRACT_ADDRESS}`);
+console.info(`BGOV contract: ${CONTRACT_ADDRESS}`);
+console.info(`BTREE contract: ${BTREE_CONTRACT_ADDRESS}`);
 console.info(`Chain ID: ${chainId}`);
 
 const mintPrice = ethers.utils.parseUnits("1000.0", "ether").toBigInt();
