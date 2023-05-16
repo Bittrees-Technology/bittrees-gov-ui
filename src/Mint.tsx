@@ -1,22 +1,23 @@
 import { useAccount, usePrepareContractWrite, useContractWrite } from "wagmi";
 import abi from "./abi.json";
 import {
-  goerli,
-  // mainnet
+  // goerli,
+  mainnet,
 } from "wagmi/chains";
 import { useState, useEffect } from "react";
 import { ethers } from "ethers";
 import { useBtreeInformation } from "./useBtreeInformation";
 import { useManageAllowanceTransaction } from "./useManageAllowanceTransaction";
 
-const CONTRACT_ADDRESS = "0x10b127fae74cdd7cebd365fc01d36dfe2e96e0c3";
-const BTREE_CONTRACT_ADDRESS = "0x1Ca23BB7dca2BEa5F57552AE99C3A44fA7307B5f";
+const CONTRACT_ADDRESS = "0x6573248d7a8e18807cbbc6d574c9c21c044c84d1";
+const BTREE_CONTRACT_ADDRESS = "0x6bDdE71Cf0C751EB6d5EdB8418e43D3d9427e436";
 
 // const chainId =
 //   process.env.REACT_APP_ENABLE_TESTNETS === "true" ? goerli.id : mainnet.id;
-const chainId = goerli.id;
+const chainId = mainnet.id;
 
-console.info(`Contract: ${CONTRACT_ADDRESS}`);
+console.info(`BGOV contract: ${CONTRACT_ADDRESS}`);
+console.info(`BTREE contract: ${BTREE_CONTRACT_ADDRESS}`);
 console.info(`Chain ID: ${chainId}`);
 
 const mintPrice = ethers.utils.parseUnits("1000.0", "ether").toBigInt();
@@ -150,12 +151,6 @@ export function Mint() {
   if (mintState === MintState.NotConnected) {
     return (
       <div>
-        {chainId === goerli.id && (
-          <div className="text-2xl text-red-500 p-4">
-            This site is on testnet. Real BGOV tokens are not mintable yet.
-          </div>
-        )}
-
         <p className="text-2xl mt-4">Please connect your wallet.</p>
       </div>
     );
@@ -163,11 +158,6 @@ export function Mint() {
 
   return (
     <>
-      {chainId === goerli.id && (
-        <div className="text-2xl text-red-500 p-4">
-          This site is on testnet. Real BGOV tokens are not mintable yet.{" "}
-        </div>
-      )}
       <div className="grid grid-cols-2 gap-6 justify-start font-newtimesroman">
         <div className="text-right">Cost per BGOV token:</div>
         <div className="text-left">{displayMintPrice} BTREE</div>
