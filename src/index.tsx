@@ -47,7 +47,7 @@ const router = createBrowserRouter([
     element: <App />,
   },
   {
-    path: "/mint",
+    path: "/mint/bgov",
     element: <MintPage />,
   },
   {
