@@ -3,7 +3,7 @@ function App() {
     <div className="max-w-4xl mx-auto">
       <header className="border-2 bg-white">
         <div className="w-full">
-          <div className="font-newtimesroman p-32 h-80 pb-0 text-7xl text-center font-bold tracking-wider">
+          <div className="font-newtimesroman py-20 text-6xl text-center font-bold tracking-wider">
             Bittrees, Inc
           </div>
         </div>

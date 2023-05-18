@@ -6,7 +6,7 @@ function VisionStatementPage() {
       <header className="border-2 bg-white">
         <div className="w-full">
           <a href="./" className="mx-auto">
-            <div className="font-newtimesroman p-32 h-80 pb-0 text-7xl text-center font-bold tracking-wider">
+            <div className="font-newtimesroman py-20 text-6xl text-center font-bold tracking-wider">
               Bittrees, Inc
             </div>
           </a>

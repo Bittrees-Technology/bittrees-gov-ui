@@ -7,7 +7,7 @@ function MintPage() {
       <header className="border-2 border-b-0 bg-white">
         <div className="w-full">
           <a href="./" className="mx-auto">
-            <div className="font-newtimesroman p-20 pb-0 text-7xl text-center font-bold tracking-wider">
+            <div className="font-newtimesroman pt-10 pb-6 text-6xl text-center font-bold tracking-wider">
               Bittrees, Inc
             </div>
           </a>
@@ -17,12 +17,12 @@ function MintPage() {
       <main className="text-center bg-white border-2 border-t-0">
         <div className="flex flex-col gap-3 p-4 md:p-12 items-center">
           <div className="mx-auto flex flex-col items-center max-w-md drop-shadow-xl">
-              <img
-                src="/bgov-cert-sm.png"
-                width="1000px"
-                height="566px"
-                alt="BGOV Certificate of Stock"
-              />
+            <img
+              src="/bgov-cert-sm.png"
+              width="1000px"
+              height="566px"
+              alt="BGOV Certificate of Stock"
+            />
           </div>
           <div className="mt-4">
             <Mint />
