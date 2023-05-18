@@ -3,7 +3,7 @@ function App() {
     <div className="max-w-4xl mx-auto">
       <header className="border-2 bg-white">
         <div className="w-full">
-          <div className="font-newtimesroman py-20 text-6xl text-center font-bold tracking-wider">
+          <div className="font-newtimesroman py-20 text-4xl sm:text-6xl text-center font-bold tracking-wider">
             Bittrees, Inc
           </div>
         </div>
@@ -15,7 +15,7 @@ function App() {
             <div className="m-4 mx-auto max-w-xl">
               <div className="grid grid-cols-2 gap-6">
                 <div className="text-left font-newtimesroman">
-                  <ul className="max-w-md space-y-1 text-gray-400 list-disc list-outside ms-2 dark:text-gray-400 ">
+                  <ul className="max-w-md space-y-1 text-gray-400 list-disc list-outside ms-4 dark:text-gray-400 ">
                     <li className="p-2">
                       <a
                         className="text-black no-underline hover:underline hover:text-green-700"
@@ -56,7 +56,7 @@ function App() {
                   </ul>
                 </div>
                 <div className="text-left font-newtimesroman">
-                  <ul className="max-w-md space-y-1 text-gray-400 list-disc list-outside ms-2 dark:text-gray-400 ">
+                  <ul className="max-w-md space-y-1 text-gray-400 list-disc list-outside ms-4 dark:text-gray-400 ">
                     <li className="p-2">
                       <a
                         className="text-black no-underline hover:underline hover:text-green-700"

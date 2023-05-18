@@ -7,7 +7,7 @@ function MintPage() {
       <header className="border-2 border-b-0 bg-white">
         <div className="w-full">
           <a href="./" className="mx-auto">
-            <div className="font-newtimesroman pt-10 pb-6 text-6xl text-center font-bold tracking-wider">
+            <div className="font-newtimesroman pt-10 pb-6 text-4xl sm:text-6xl text-center font-bold tracking-wider">
               Bittrees, Inc
             </div>
           </a>

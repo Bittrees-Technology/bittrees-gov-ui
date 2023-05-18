@@ -13,7 +13,7 @@ export function CodeOfConductContent() {
           
           <h2 className="text-xl font-bold">Code Of Conduct</h2>
           <br />
-          <ol className="max-w-md space-y-1 text-gray-600 list-decimal list-outside dark:text-gray-600 ">
+          <ol className="max-w-md space-y-1 text-gray-600 list-decimal list-outside ms-4 dark:text-gray-600 ">
             <li><b>Respect others:</b> Treat fellow community members with respect and courtesy. Harassment, hate speech, discrimination, or any other form of harmful behavior will not be tolerated.</li>
 
             <li><b>Stay on topic:</b> Keep conversations on topic and relevant to the community channels. Off-topic discussions should be taken to appropriate channels.</li>
