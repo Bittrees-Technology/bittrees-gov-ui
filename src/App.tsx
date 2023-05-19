@@ -52,7 +52,16 @@ function App() {
                         Mint BGOV
                       </a>
                     </li>
-                    <li className="p-2">BGOV Contract</li>
+                    <li className="p-2">
+                      <a
+                        className="text-black no-underline hover:underline hover:text-green-700"
+                        target="_blank"
+                        rel="noreferrer"
+                        href="https://etherscan.io/address/0x6573248d7a8e18807cbbc6d574c9c21c044c84d1"
+                      >
+                        BGOV Contract
+                      </a>
+                    </li>
                   </ul>
                 </div>
                 <div className="text-left font-newtimesroman">
