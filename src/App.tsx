@@ -62,8 +62,10 @@ function App() {
                         BGOV Contract
                       </a>
                     </li>
+                    <li className="p-2">Snapshot</li>
                   </ul>
                 </div>
+
                 <div className="text-left font-newtimesroman">
                   <ul className="max-w-md space-y-1 text-gray-400 list-disc list-outside ms-4 dark:text-gray-400 ">
                     <li className="p-2">
@@ -89,6 +91,16 @@ function App() {
                         className="text-black no-underline hover:underline hover:text-green-700"
                         target="_blank"
                         rel="noreferrer"
+                        href="https://www.voxels.com/play?coords=W@429W,182S"
+                      >
+                        Metaverse HQ
+                      </a>
+                    </li>
+                    <li className="p-2">
+                      <a
+                        className="text-black no-underline hover:underline hover:text-green-700"
+                        target="_blank"
+                        rel="noreferrer"
                         href="https://t.me/BittreesCommunity"
                       >
                         Telegram
@@ -105,7 +117,6 @@ function App() {
                       </a>
                     </li>
                     <li className="p-2">Governance Forum</li>
-                    <li className="p-2">Snapshot</li>
                   </ul>
                 </div>
               </div>
