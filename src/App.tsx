@@ -16,14 +16,7 @@ function App() {
               <div className="grid grid-cols-2 gap-6">
                 <div className="text-left font-newtimesroman">
                   <ul className="max-w-md space-y-1 text-gray-400 list-disc list-outside ms-4 dark:text-gray-400 ">
-                    <li className="p-2">
-                      <a
-                        className="text-black no-underline hover:underline hover:text-green-700"
-                        href="/visionstatement"
-                      >
-                        Vision Statement
-                      </a>
-                    </li>
+
                     <li className="p-2">
                       <a
                         className="text-black no-underline hover:underline hover:text-green-700"
@@ -62,12 +55,21 @@ function App() {
                         BGOV Contract
                       </a>
                     </li>
+                    <li className="p-2">Governance Forum</li>
                     <li className="p-2">Snapshot</li>
                   </ul>
                 </div>
 
                 <div className="text-left font-newtimesroman">
                   <ul className="max-w-md space-y-1 text-gray-400 list-disc list-outside ms-4 dark:text-gray-400 ">
+                  <li className="p-2">
+                      <a
+                        className="text-black no-underline hover:underline hover:text-green-700"
+                        href="/visionstatement"
+                      >
+                        Vision Statement
+                      </a>
+                    </li>
                     <li className="p-2">
                       <a
                         className="text-black no-underline hover:underline hover:text-green-700"
@@ -116,7 +118,7 @@ function App() {
                         Become a Contributor
                       </a>
                     </li>
-                    <li className="p-2">Governance Forum</li>
+
                   </ul>
                 </div>
               </div>
@@ -124,6 +126,29 @@ function App() {
           </div>
 
           <footer className="flex flex-col gap-6 mx-auto mt-4">
+            <span>
+              <a className="hover:text-green-700" href="https://bittrees.org">
+                <span className="inline-block align-middle pr-1">
+                  <svg
+                    className="h-4 w-4 hover:text-green-700"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    {" "}
+                    <circle cx="12" cy="12" r="10" />{" "}
+                    <polyline points="12 8 8 12 12 16" />{" "}
+                    <line x1="16" y1="12" x2="8" y2="12" />
+                  </svg>
+                </span>
+                <span className="inline-block align-middle underline font-bold font-newtimesroman">
+                  Back
+                </span>
+              </a>
+            </span>
             <div className="flex w-full justify-center items-center">
               <a href="/" className="mx-auto">
                 <img
