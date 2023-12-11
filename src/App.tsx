@@ -16,7 +16,16 @@ function App() {
               <div className="grid grid-cols-2 gap-6">
                 <div className="text-left font-newtimesroman">
                   <ul className="max-w-md space-y-1 text-gray-400 list-disc list-outside ms-4 dark:text-gray-400 ">
-
+                    <li className="p-2">
+                      <a
+                        className="text-black no-underline hover:underline hover:text-green-700"
+                        target="_blank"
+                        rel="noreferrer"
+                        href="https://paragraph.xyz/@bittrees_research/an-experiment-on-tokenomics"
+                      >
+                        April 14, 2023
+                      </a>
+                    </li>
                     <li className="p-2">
                       <a
                         className="text-black no-underline hover:underline hover:text-green-700"
@@ -56,13 +65,22 @@ function App() {
                       </a>
                     </li>
                     <li className="p-2">Governance Forum</li>
-                    <li className="p-2">Snapshot</li>
+                    <li className="p-2">
+                      <a
+                        className="text-black no-underline hover:underline hover:text-green-700"
+                        target="_blank"
+                        rel="noreferrer"
+                        href="https://snapshot.org/#/gov.bittrees.eth"
+                      >
+                        Snapshot
+                      </a>
+                    </li>
                   </ul>
                 </div>
 
                 <div className="text-left font-newtimesroman">
                   <ul className="max-w-md space-y-1 text-gray-400 list-disc list-outside ms-4 dark:text-gray-400 ">
-                  <li className="p-2">
+                    <li className="p-2">
                       <a
                         className="text-black no-underline hover:underline hover:text-green-700"
                         href="/visionstatement"
@@ -118,7 +136,6 @@ function App() {
                         Become a Contributor
                       </a>
                     </li>
-
                   </ul>
                 </div>
               </div>
