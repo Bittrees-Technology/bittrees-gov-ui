@@ -64,7 +64,16 @@ function App() {
                         BGOV Contract
                       </a>
                     </li>
-                    <li className="p-2">Governance Forum</li>
+                    <li className="p-2">
+                      <a
+                        className="text-black no-underline hover:underline hover:text-green-700"
+                        target="_blank"
+                        rel="noreferrer"
+                        href="https://metaforo.io/g/bittreesinc"
+                      >
+                        Governance Forum
+                      </a>
+                    </li>
                     <li className="p-2">
                       <a
                         className="text-black no-underline hover:underline hover:text-green-700"
