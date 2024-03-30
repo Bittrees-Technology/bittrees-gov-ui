@@ -5,6 +5,7 @@ import MintPage from "./MintPage";
 import MembersPage from "./MembersPage";
 import CodeOfConductPage from "./CodeOfConductPage";
 import VisionStatementPage from "./VisionStatementPage";
+import { TokenFlowPage } from "./TokenFlowPage";
 import reportWebVitals from "./reportWebVitals";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import "@rainbow-me/rainbowkit/styles.css";
@@ -67,6 +68,10 @@ const router = createBrowserRouter([
   {
     path: "/visionstatement",
     element: <VisionStatementPage />,
+  },
+  {
+    path: "/69420",
+    element: <TokenFlowPage />,
   },
 ]);
 
