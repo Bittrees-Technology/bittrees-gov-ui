@@ -21,9 +21,9 @@ function App() {
                         className="text-black no-underline hover:underline hover:text-green-700"
                         target="_blank"
                         rel="noreferrer"
-                        href="https://paragraph.xyz/@bittrees_research/an-experiment-on-tokenomics"
+                        href="https://bittrees.eth.limo"
                       >
-                        April 14, 2023
+                        bittrees.eth
                       </a>
                     </li>
                     <li className="p-2">
