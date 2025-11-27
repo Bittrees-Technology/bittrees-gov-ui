@@ -21,9 +21,9 @@ function App() {
                         className="text-black no-underline hover:underline hover:text-green-700"
                         target="_blank"
                         rel="noreferrer"
-                        href="https://bittrees.eth.limo"
+                        href="https://bittrees.eth.limo/binc/"
                       >
-                        bittrees.eth
+                        Wiki
                       </a>
                     </li>
                     <li className="p-2">
