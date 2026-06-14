@@ -4,7 +4,8 @@ import { getAddress, parseUnits, isAddress } from "viem";
 import { useAccount, useWalletClient } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useQueryClient } from "@tanstack/react-query";
-import { useIsAdmin, fetchSpaceSettings, updateSpaceSettings } from "../lib/snapshot";
+import { fetchSpaceSettings, updateSpaceSettings } from "../lib/snapshot";
+import { useAdminAccess, type AdminLevel } from "../lib/adminAccess";
 import { BGOV_ROOMS, SAFE_ROOMS, ROOM_ADMINS, initPush, createGatedGroup, gateUrl, gateLabel, type PushRoom, type PushClient, type RoomGate, type RoomRule } from "../lib/push";
 import { useRoomRegistry, saveRoomChatId, saveCustomRoom, deleteCustomRoom } from "../lib/rooms";
 import { assignRole, unassignRole, createRole, deleteRole, selectableRoles, useCommunity, moderateItem, publishEncKey, TIER_ROLES } from "../lib/community";
@@ -19,7 +20,7 @@ function humanError(e: unknown): string {
 
 export default function Admin() {
   const { address, isConnected } = useAccount();
-  const isAdmin = useIsAdmin(address);
+  const level = useAdminAccess(address);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.75rem", maxWidth: "780px", margin: "0 auto", width: "100%" }}>
@@ -38,14 +39,14 @@ export default function Admin() {
           <p style={{ ...dim, margin: 0 }}>Connect a wallet.</p>
           <ConnectButton chainStatus="none" showBalance={false} />
         </div>
-      ) : !isAdmin ? (
+      ) : level === "none" ? (
         <div className="card">
           <p style={{ ...dim, margin: 0 }}>
-            This page is for the space's admins. The connected wallet isn't an admin of gov.bittrees.eth.
+            This page is for admins. The connected wallet isn't a space admin and has no admin role.
           </p>
         </div>
       ) : (
-        <AdminConsole address={address!} />
+        <AdminConsole address={address!} level={level} />
       )}
     </div>
   );
@@ -61,12 +62,14 @@ const ADMIN_TABS = [
 ] as const;
 type AdminTabKey = (typeof ADMIN_TABS)[number]["key"];
 
-function AdminConsole({ address }: { address: `0x${string}` }) {
-  const [tab, setTab] = useState<AdminTabKey>("settings");
+function AdminConsole({ address, level }: { address: `0x${string}`; level: AdminLevel }) {
+  // Moderators see only the Moderation tab; full admins see everything.
+  const tabs = level === "moderation" ? ADMIN_TABS.filter((t) => t.key === "moderation") : ADMIN_TABS;
+  const [tab, setTab] = useState<AdminTabKey>(tabs[0].key);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
       <div style={{ display: "flex", gap: "0.15rem", borderBottom: "1px solid var(--color-border)", flexWrap: "wrap" }}>
-        {ADMIN_TABS.map((t) => (
+        {tabs.map((t) => (
           <AdminTabBtn key={t.key} active={tab === t.key} onClick={() => setTab(t.key)}>{t.label}</AdminTabBtn>
         ))}
       </div>

@@ -97,6 +97,14 @@ function hasRole(rolesMap, addrLower, re) {
   return list.some((r) => re.test(String(r?.label || "")));
 }
 
+// Full admin access: the standing super-admin, a Snapshot space admin, or a
+// Partner / Junior Partner / Associate role. Mirrors src/lib/adminAccess.ts.
+const SUPER_ADMIN = "0xe5350d96fc3161bf5c385843ec5ee24e8b465b2f";
+const FULL_ROLE_RE = /^(partner|junior partner|associate)$/i;
+function isFullAdmin(signer, admins, rolesMap) {
+  return signer === SUPER_ADMIN || (admins || []).includes(signer) || hasRole(rolesMap, signer, FULL_ROLE_RE);
+}
+
 export default async function handler(req, res) {
   res.setHeader("access-control-allow-origin", "*");
   res.setHeader("cache-control", "no-store");
@@ -141,11 +149,11 @@ export default async function handler(req, res) {
       const t = getAddress(target).toLowerCase();
       const verb = body.assignRole ? "assign" : "unassign";
       const signer = await recover(address, signature, `Bittrees roles\n${verb} ${label} -> ${t}\nat ${timestamp}`);
-      const admins = await spaceRoles(false);
+      const [admins, rolesRaw] = await Promise.all([spaceRoles(false), readJson(ROLES_KEY, {})]);
+      const roles = rolesRaw || {};
       if (!signer) { res.status(400).json({ error: "bad signature" }); return; }
-      if (admins.length === 0) { res.status(503).json({ error: "could not verify admins" }); return; }
-      if (!admins.includes(signer)) { res.status(403).json({ error: "signer is not a space admin" }); return; }
-      const roles = (await readJson(ROLES_KEY, {})) || {};
+      if (admins.length === 0 && signer !== SUPER_ADMIN) { res.status(503).json({ error: "could not verify admins" }); return; }
+      if (!isFullAdmin(signer, admins, roles)) { res.status(403).json({ error: "not authorized" }); return; }
       if (body.assignRole) {
         const entry = { label: String(label).slice(0, 32), color: String(color || "").slice(0, 16) };
         roles[t] = [...(roles[t] || []).filter((r) => r.label !== entry.label), entry];
@@ -165,10 +173,10 @@ export default async function handler(req, res) {
       if (!label) { res.status(400).json({ error: "invalid role label" }); return; }
       const verb = body.createRole ? "create" : "delete";
       const signer = await recover(address, signature, `Bittrees roledef\n${verb} ${label}\nat ${timestamp}`);
-      const admins = await spaceRoles(false);
+      const [admins, rolesMap] = await Promise.all([spaceRoles(false), readJson(ROLES_KEY, {})]);
       if (!signer) { res.status(400).json({ error: "bad signature" }); return; }
-      if (admins.length === 0) { res.status(503).json({ error: "could not verify admins" }); return; }
-      if (!admins.includes(signer)) { res.status(403).json({ error: "signer is not a space admin" }); return; }
+      if (admins.length === 0 && signer !== SUPER_ADMIN) { res.status(503).json({ error: "could not verify admins" }); return; }
+      if (!isFullAdmin(signer, admins, rolesMap || {})) { res.status(403).json({ error: "not authorized" }); return; }
       const defs = (await readJson(ROLEDEFS_KEY, [])) || [];
       const without = defs.filter((d) => String(d.label || "").toLowerCase() !== label.toLowerCase());
       if (body.createRole) {
@@ -249,9 +257,11 @@ export default async function handler(req, res) {
       if (!id || !["approve", "remove", "clear"].includes(action)) { res.status(400).json({ error: "bad action" }); return; }
       const signer = await recover(address, signature, `Bittrees moderate\n${action} ${id}\nat ${timestamp}`);
       if (!signer) { res.status(400).json({ error: "bad signature" }); return; }
-      const [mods, roles] = await Promise.all([spaceRoles(true), readJson(ROLES_KEY, {})]);
-      if (mods.length === 0) { res.status(503).json({ error: "could not verify moderators" }); return; }
-      if (!mods.includes(signer) && !hasRole(roles, signer, /^(moderator|mod)$/i)) { res.status(403).json({ error: "signer is not a moderator" }); return; }
+      const [mods, rolesRaw] = await Promise.all([spaceRoles(true), readJson(ROLES_KEY, {})]);
+      const roles = rolesRaw || {};
+      if (mods.length === 0 && signer !== SUPER_ADMIN) { res.status(503).json({ error: "could not verify moderators" }); return; }
+      // Full admins (space admin / super / Partner-tier) OR the Moderator role may moderate.
+      if (!isFullAdmin(signer, mods, roles) && !hasRole(roles, signer, /^(moderator|mod)$/i)) { res.status(403).json({ error: "not authorized to moderate" }); return; }
       const flags = (await readJson(FLAGS_KEY, {})) || {};
       const rec = flags[id];
       if (rec) {

@@ -14,8 +14,18 @@ const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
 const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 const ROOMS_KEY = "bittrees:rooms"; // { roomKey: chatId } for built-in rooms
 const CUSTOM_KEY = "bittrees:customrooms"; // [{ key, name, blurb, gate, chatId }]
+const ROLES_KEY = "bittrees:roles"; // { <addrLower>: [{ label, color }] } — admin-assigned roles
 const SNAPSHOT_SPACE = "gov.bittrees.eth";
 const REPLAY_WINDOW_MS = 10 * 60 * 1000;
+
+// Full admin access: the standing super-admin, a Snapshot space admin, or a
+// Partner / Junior Partner / Associate role. Mirrors src/lib/adminAccess.ts.
+const SUPER_ADMIN = "0xe5350d96fc3161bf5c385843ec5ee24e8b465b2f";
+const FULL_ROLE_RE = /^(partner|junior partner|associate)$/i;
+function hasFullRole(rolesMap, addrLower) {
+  const list = (rolesMap && rolesMap[addrLower]) || [];
+  return list.some((r) => FULL_ROLE_RE.test(String(r?.label || "")));
+}
 
 async function kvCommand(cmd) {
   const r = await fetch(KV_URL, {
@@ -70,7 +80,8 @@ function validGate(g) {
   return validRule(g);
 }
 
-/** Verify the request is signed by a live gov.bittrees.eth admin over `message`. */
+/** Verify the request is signed by a full admin: a live gov.bittrees.eth space
+ *  admin, the super-admin address, or a Partner/Junior Partner/Associate role. */
 async function verifyAdmin(address, signature, message) {
   if (!isAddr(address)) return { ok: false, code: 400, error: "invalid address" };
   let recovered;
@@ -79,12 +90,13 @@ async function verifyAdmin(address, signature, message) {
   } catch {
     return { ok: false, code: 400, error: "bad signature" };
   }
-  const admins = await spaceAdmins();
+  if (getAddress(recovered) !== getAddress(address)) return { ok: false, code: 403, error: "signature mismatch" };
+  const signer = recovered.toLowerCase();
+  if (signer === SUPER_ADMIN) return { ok: true };
+  const [admins, roles] = await Promise.all([spaceAdmins(), readJson(ROLES_KEY, {})]);
+  if (admins.includes(signer) || hasFullRole(roles || {}, signer)) return { ok: true };
   if (admins.length === 0) return { ok: false, code: 503, error: "could not verify admins" };
-  if (getAddress(recovered) !== getAddress(address) || !admins.includes(recovered.toLowerCase())) {
-    return { ok: false, code: 403, error: "signer is not a space admin" };
-  }
-  return { ok: true };
+  return { ok: false, code: 403, error: "not authorized" };
 }
 
 export default async function handler(req, res) {

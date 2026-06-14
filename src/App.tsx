@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, NavLink, Link } from "react-router";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useState } from "react";
 import { useAccount } from "wagmi";
-import { useIsAdmin } from "./lib/snapshot";
+import { useAdminAccess } from "./lib/adminAccess";
 import Overview from "./pages/Overview";
 import Proposals from "./pages/Proposals";
 import ProposalDetail from "./pages/ProposalDetail";
@@ -68,9 +68,10 @@ export default function App() {
 function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { address } = useAccount();
-  const isAdmin = useIsAdmin(address);
-  // Admin tab — appended to the right of BGOV, visible only to space admins.
-  const nav = isAdmin ? [...NAV, { to: ROUTES.admin, label: "Admin", end: false }] : NAV;
+  const adminLevel = useAdminAccess(address);
+  // Admin tab — appended to the right of BGOV, shown to anyone with admin access
+  // (full admins or moderators); the Admin page itself shows only their allowed tabs.
+  const nav = adminLevel !== "none" ? [...NAV, { to: ROUTES.admin, label: "Admin", end: false }] : NAV;
 
   return (
     <header
