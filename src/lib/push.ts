@@ -96,15 +96,21 @@ export const SAFE_ROOMS: PushRoom[] = ENTITIES.filter((e) => !!e.ens).map((e) =>
 
 export const GATE_BASE_URL = (import.meta.env.VITE_GATE_URL as string) || "https://gov.bittrees.org/api/gate";
 
-/** The CustomEndpoint URL Push GETs to enforce a room's gate. */
+/**
+ * The CustomEndpoint URL Push GETs to enforce a room's gate. Push REQUIRES the
+ * literal `{{user_address}}` template in the URL — it substitutes the requester's
+ * address there before calling. The gate handler reads that address segment and
+ * the trailing `/checkAccess` matches its documented path contract.
+ */
+const USER = "{{user_address}}";
 export function gateUrl(room: PushRoom): string {
   const g = room.gate;
   // Multiple rules (or a single ENS rule) ride along in the URL, base64-encoded.
-  if (g.kind === "multi") return `${GATE_BASE_URL}/multi/${encodeGate(g)}`;
-  if (g.kind === "ens") return `${GATE_BASE_URL}/multi/${encodeGate({ kind: "multi", combine: "any", rules: [g] })}`;
-  if (g.kind === "safe") return `${GATE_BASE_URL}/safe/${g.safe}`;
-  if (g.kind === "token") return `${GATE_BASE_URL}/token/${g.standard}/${g.token}/${g.min}`;
-  return `${GATE_BASE_URL}/${g.tier}`;
+  if (g.kind === "multi") return `${GATE_BASE_URL}/multi/${encodeGate(g)}/${USER}/checkAccess`;
+  if (g.kind === "ens") return `${GATE_BASE_URL}/multi/${encodeGate({ kind: "multi", combine: "any", rules: [g] })}/${USER}/checkAccess`;
+  if (g.kind === "safe") return `${GATE_BASE_URL}/safe/${g.safe}/${USER}/checkAccess`;
+  if (g.kind === "token") return `${GATE_BASE_URL}/token/${g.standard}/${g.token}/${g.min}/${USER}/checkAccess`;
+  return `${GATE_BASE_URL}/${g.tier}/${USER}/checkAccess`;
 }
 
 async function sdk() {
