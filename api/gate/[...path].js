@@ -1,0 +1,192 @@
+import { createPublicClient, http, getAddress } from "viem";
+import { mainnet } from "viem/chains";
+import { normalize } from "viem/ens";
+
+/**
+ * Stateless token-gate for the Push Chat community rooms. No keys, no DB.
+ *
+ * Push Chat GETs this endpoint when a wallet tries to join a gated group, and
+ * admits it on HTTP 200 (denies otherwise). Two room kinds:
+ *
+ *  - BGOV tier:  GET /api/gate/<tier>/<address>/checkAccess
+ *      `<tier>` is the minimum BGOV (1/69/210/420). BGOV is a many-id ERC-1155,
+ *      so the holder's total is read from Snapshot's `vp` (the space's
+ *      erc1155-all-balances-of strategy) rather than a single balanceOf.
+ *
+ *  - ENS-subname Safe:  GET /api/gate/safe/<safeAddress>/<address>/checkAccess
+ *      Admits the Safe's signers (on-chain `getOwners`) and proposers (delegates
+ *      from the public Safe Transaction Service).
+ */
+
+const SNAPSHOT_SPACE = "gov.bittrees.eth";
+const RPC = process.env.MAINNET_RPC_URL || process.env.VITE_MAINNET_RPC_URL || "https://ethereum-rpc.publicnode.com";
+const SAFE_TX_SERVICE = "https://safe-transaction-mainnet.safe.global";
+
+const SAFE_ABI = [
+  { name: "getOwners", type: "function", stateMutability: "view", inputs: [], outputs: [{ type: "address[]" }] },
+];
+const client = createPublicClient({ chain: mainnet, transport: http(RPC) });
+
+async function bgovVotingPower(address) {
+  const r = await fetch("https://hub.snapshot.org/graphql", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      query: "query($v:String!,$s:String!){ vp(voter:$v, space:$s){ vp } }",
+      variables: { v: address, s: SNAPSHOT_SPACE },
+    }),
+  });
+  const j = await r.json().catch(() => ({}));
+  return Number(j?.data?.vp?.vp ?? 0);
+}
+
+async function safeOwners(safe) {
+  try {
+    const owners = await client.readContract({ address: safe, abi: SAFE_ABI, functionName: "getOwners" });
+    return owners.map((o) => o.toLowerCase());
+  } catch {
+    return [];
+  }
+}
+
+async function safeDelegates(safe) {
+  try {
+    const r = await fetch(`${SAFE_TX_SERVICE}/api/v2/delegates/?safe=${safe}`, { headers: { accept: "application/json" } });
+    if (!r.ok) return [];
+    const j = await r.json();
+    return (j?.results ?? []).map((d) => String(d.delegate || "").toLowerCase()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+const ERC_BAL_ABI = [
+  { name: "balanceOf", type: "function", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
+];
+// ERC-20 and ERC-721 both expose balanceOf(address) → uint256 (token count / raw units).
+async function tokenBalance(token, user) {
+  try {
+    return await client.readContract({ address: token, abi: ERC_BAL_ABI, functionName: "balanceOf", args: [user] });
+  } catch {
+    return 0n;
+  }
+}
+
+const isAddr = (s) => /^0x[a-fA-F0-9]{40}$/.test(s);
+
+/** Decode a base64url gate object from the URL. */
+function decodeGate(b64) {
+  const s = String(b64 || "").replace(/-/g, "+").replace(/_/g, "/");
+  return JSON.parse(Buffer.from(s, "base64").toString("utf8"));
+}
+
+/** Address an ENS name resolves to (or null). */
+async function ensResolve(name) {
+  try {
+    return await client.getEnsAddress({ name: normalize(String(name)) });
+  } catch {
+    return null;
+  }
+}
+
+/** Evaluate a single access rule for `user` (checksummed). */
+async function evalRule(rule, user) {
+  const u = user.toLowerCase();
+  try {
+    if (rule.kind === "bgov") return (await bgovVotingPower(u)) >= Number(rule.tier || 0);
+    if (rule.kind === "safe") {
+      if (!isAddr(rule.safe)) return false;
+      const safe = getAddress(rule.safe);
+      const [owners, delegates] = await Promise.all([safeOwners(safe), safeDelegates(safe)]);
+      return owners.includes(u) || delegates.includes(u);
+    }
+    if (rule.kind === "token") {
+      if (!isAddr(rule.token)) return false;
+      let min; try { min = BigInt(rule.min); } catch { min = 1n; }
+      return (await tokenBalance(getAddress(rule.token), user)) >= min;
+    }
+    if (rule.kind === "ens") {
+      if (rule.name) {
+        const addr = await ensResolve(rule.name);
+        return !!addr && addr.toLowerCase() === u;
+      }
+      // No name → admit anyone who has a primary (reverse) ENS name set.
+      try { return !!(await client.getEnsName({ address: user })); } catch { return false; }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+export default async function handler(req, res) {
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("cache-control", "no-store");
+  try {
+    const parts = (req.url || "").split("?")[0].split("/").filter(Boolean);
+    const gi = parts.indexOf("gate");
+
+    // ENS-subname Safe room: /api/gate/safe/<safeAddress>/<userAddress>/checkAccess
+    if (parts[gi + 1] === "safe") {
+      const safeRaw = parts[gi + 2] || "";
+      const userRaw = parts[gi + 3] || "";
+      if (!isAddr(safeRaw) || !isAddr(userRaw)) {
+        res.status(400).json({ error: "invalid address" });
+        return;
+      }
+      const safe = getAddress(safeRaw);
+      const user = userRaw.toLowerCase();
+      const [owners, delegates] = await Promise.all([safeOwners(safe), safeDelegates(safe)]);
+      const role = owners.includes(user) ? "signer" : delegates.includes(user) ? "proposer" : null;
+      res.status(role ? 200 : 403).json({ access: !!role, role, safe });
+      return;
+    }
+
+    // Multi-rule room: /api/gate/multi/<base64 gate>/<userAddress>/checkAccess
+    if (parts[gi + 1] === "multi") {
+      const userRaw = parts[gi + 3] || "";
+      if (!isAddr(userRaw)) { res.status(400).json({ error: "invalid address" }); return; }
+      let gate;
+      try { gate = decodeGate(parts[gi + 2]); } catch { res.status(400).json({ error: "bad gate" }); return; }
+      const user = getAddress(userRaw);
+      const rules = Array.isArray(gate?.rules) ? gate.rules : [];
+      const combine = gate?.combine === "all" ? "all" : "any";
+      if (rules.length === 0) { res.status(403).json({ access: false }); return; }
+      const results = await Promise.all(rules.map((r) => evalRule(r, user)));
+      const ok = combine === "all" ? results.every(Boolean) : results.some(Boolean);
+      res.status(ok ? 200 : 403).json({ access: ok, combine, rules: rules.length });
+      return;
+    }
+
+    // Token-gated room: /api/gate/token/<standard>/<tokenAddr>/<min>/<userAddress>/checkAccess
+    if (parts[gi + 1] === "token") {
+      const tokenRaw = parts[gi + 3] || "";
+      const min = parts[gi + 4] || "1";
+      const userRaw = parts[gi + 5] || "";
+      if (!isAddr(tokenRaw) || !isAddr(userRaw)) {
+        res.status(400).json({ error: "invalid address" });
+        return;
+      }
+      let minBig;
+      try { minBig = BigInt(min); } catch { minBig = 1n; }
+      const bal = await tokenBalance(getAddress(tokenRaw), getAddress(userRaw));
+      const ok = bal >= minBig;
+      res.status(ok ? 200 : 403).json({ access: ok, balance: bal.toString(), min });
+      return;
+    }
+
+    // BGOV-tier room: /api/gate/<tier>/<address>/checkAccess
+    const tier = Number(parts[gi + 1]) || 1;
+    const addrRaw = parts[gi + 2] || "";
+    if (!isAddr(addrRaw)) {
+      res.status(400).json({ error: "invalid address" });
+      return;
+    }
+    const address = addrRaw.toLowerCase();
+    const vp = await bgovVotingPower(address);
+    const ok = vp >= tier;
+    res.status(ok ? 200 : 403).json({ access: ok, bgov: vp, tier });
+  } catch (e) {
+    res.status(500).json({ error: String((e && e.message) || e) });
+  }
+}

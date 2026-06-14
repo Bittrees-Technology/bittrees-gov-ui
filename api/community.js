@@ -1,0 +1,270 @@
+import { recoverMessageAddress, getAddress } from "viem";
+
+/**
+ * Community registry — admin-assigned custom roles/tags AND community moderation
+ * flags. Backed by Vercel KV / Upstash over its REST API. Reads are public.
+ * Writes are signed:
+ *   - roles (assign/unassign): a live gov.bittrees.eth space ADMIN
+ *   - flag/unflag: any BGOV holder (shareholder), verified server-side
+ *   - moderate (approve/remove): a space admin OR moderator
+ *
+ * Content hides once FLAG_HIDE_THRESHOLD distinct shareholders flag it (unless a
+ * moderator has approved it); a moderator can approve (un-hide) or remove (keep
+ * hidden). Forum posts are immutable on-chain, so "hide" is an app-level filter.
+ *
+ * Vercel KV / Upstash inject: KV_REST_API_URL / KV_REST_API_TOKEN (or UPSTASH_*).
+ */
+
+const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+const ROLES_KEY = "bittrees:roles"; // { <addrLower>: [{ label, color }] }
+const ROLEDEFS_KEY = "bittrees:roledefs"; // [{ label, color, description }] — the catalog of assignable roles
+const FLAGS_KEY = "bittrees:flags"; // { <itemId>: { by:[addr], mod:'approved'|'removed'|null, surface, preview } }
+const ENCKEYS_KEY = "bittrees:enckeys"; // { <addrLower>: <x25519 pubkey hex> } — for encrypting applications
+const SNAPSHOT_SPACE = "gov.bittrees.eth";
+const REPLAY_WINDOW_MS = 10 * 60 * 1000;
+export const FLAG_HIDE_THRESHOLD = 2;
+
+async function kvCommand(cmd) {
+  const r = await fetch(KV_URL, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${KV_TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify(cmd),
+  });
+  if (!r.ok) throw new Error(`KV HTTP ${r.status}`);
+  return r.json();
+}
+async function readJson(key, fallback) {
+  if (!KV_URL || !KV_TOKEN) return fallback;
+  try {
+    const j = await kvCommand(["GET", key]);
+    return j?.result ? JSON.parse(j.result) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+async function writeJson(key, value) {
+  await kvCommand(["SET", key, JSON.stringify(value)]);
+}
+
+const isAddr = (s) => /^0x[a-fA-F0-9]{40}$/.test(String(s || ""));
+
+/** admins (+ optionally moderators) of the space, lowercased. */
+async function spaceRoles(includeMods) {
+  try {
+    const r = await fetch("https://hub.snapshot.org/graphql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "query($id:String!){ space(id:$id){ admins moderators } }", variables: { id: SNAPSHOT_SPACE } }),
+    });
+    const j = await r.json();
+    const s = j?.data?.space || {};
+    const list = [...(s.admins ?? []), ...(includeMods ? s.moderators ?? [] : [])];
+    return list.map((a) => String(a).toLowerCase());
+  } catch {
+    return [];
+  }
+}
+
+/** A holder's BGOV voting power (shareholder check), via Snapshot. */
+async function bgovVp(address) {
+  try {
+    const r = await fetch("https://hub.snapshot.org/graphql", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "query($v:String!,$s:String!){ vp(voter:$v, space:$s){ vp } }", variables: { v: address, s: SNAPSHOT_SPACE } }),
+    });
+    const j = await r.json();
+    return Number(j?.data?.vp?.vp ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** Recover the signer; return its lowercased address iff it matches `address`. */
+async function recover(address, signature, message) {
+  if (!isAddr(address)) return null;
+  try {
+    const rec = await recoverMessageAddress({ message, signature });
+    return getAddress(rec) === getAddress(address) ? rec.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasRole(rolesMap, addrLower, re) {
+  const list = (rolesMap && rolesMap[addrLower]) || [];
+  return list.some((r) => re.test(String(r?.label || "")));
+}
+
+export default async function handler(req, res) {
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("cache-control", "no-store");
+
+  if (req.method === "GET") {
+    const [roles, flags, enckeys, roledefs] = await Promise.all([
+      readJson(ROLES_KEY, {}),
+      readJson(FLAGS_KEY, {}),
+      readJson(ENCKEYS_KEY, {}),
+      readJson(ROLEDEFS_KEY, []),
+    ]);
+    res.status(200).json({ roles: roles || {}, flags: flags || {}, enckeys: enckeys || {}, roledefs: roledefs || [], threshold: FLAG_HIDE_THRESHOLD });
+    return;
+  }
+
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "method not allowed" });
+    return;
+  }
+  if (!KV_URL || !KV_TOKEN) {
+    res.status(503).json({ error: "registry not configured" });
+    return;
+  }
+
+  try {
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
+    const { address, signature, timestamp } = body;
+    if (!address || !signature || !timestamp) {
+      res.status(400).json({ error: "missing fields" });
+      return;
+    }
+    if (!Number.isFinite(Number(timestamp)) || Math.abs(Date.now() - Number(timestamp)) > REPLAY_WINDOW_MS) {
+      res.status(400).json({ error: "stale or invalid timestamp" });
+      return;
+    }
+
+    // ── Roles (admin-signed) ───────────────────────────────────────────────
+    if (body.assignRole || body.unassignRole) {
+      const op = body.assignRole || body.unassignRole;
+      const { target, label, color } = op;
+      if (!isAddr(target) || !label) { res.status(400).json({ error: "invalid role" }); return; }
+      const t = getAddress(target).toLowerCase();
+      const verb = body.assignRole ? "assign" : "unassign";
+      const signer = await recover(address, signature, `Bittrees roles\n${verb} ${label} -> ${t}\nat ${timestamp}`);
+      const admins = await spaceRoles(false);
+      if (!signer) { res.status(400).json({ error: "bad signature" }); return; }
+      if (admins.length === 0) { res.status(503).json({ error: "could not verify admins" }); return; }
+      if (!admins.includes(signer)) { res.status(403).json({ error: "signer is not a space admin" }); return; }
+      const roles = (await readJson(ROLES_KEY, {})) || {};
+      if (body.assignRole) {
+        const entry = { label: String(label).slice(0, 32), color: String(color || "").slice(0, 16) };
+        roles[t] = [...(roles[t] || []).filter((r) => r.label !== entry.label), entry];
+      } else {
+        const next = (roles[t] || []).filter((r) => r.label !== label);
+        if (next.length) roles[t] = next; else delete roles[t];
+      }
+      await writeJson(ROLES_KEY, roles);
+      res.status(200).json({ ok: true, roles });
+      return;
+    }
+
+    // ── Role catalog (admin-signed) — create/recolor or delete a role def ──────
+    if (body.createRole || body.deleteRole) {
+      const op = body.createRole || body.deleteRole;
+      const label = String(op.label || "").trim().slice(0, 32);
+      if (!label) { res.status(400).json({ error: "invalid role label" }); return; }
+      const verb = body.createRole ? "create" : "delete";
+      const signer = await recover(address, signature, `Bittrees roledef\n${verb} ${label}\nat ${timestamp}`);
+      const admins = await spaceRoles(false);
+      if (!signer) { res.status(400).json({ error: "bad signature" }); return; }
+      if (admins.length === 0) { res.status(503).json({ error: "could not verify admins" }); return; }
+      if (!admins.includes(signer)) { res.status(403).json({ error: "signer is not a space admin" }); return; }
+      const defs = (await readJson(ROLEDEFS_KEY, [])) || [];
+      const without = defs.filter((d) => String(d.label || "").toLowerCase() !== label.toLowerCase());
+      if (body.createRole) {
+        const def = { label, color: String(op.color || "").slice(0, 16), description: String(op.description || "").slice(0, 200) };
+        const next = [...without, def];
+        await writeJson(ROLEDEFS_KEY, next);
+        res.status(200).json({ ok: true, roledefs: next });
+      } else {
+        await writeJson(ROLEDEFS_KEY, without);
+        // Cascade: remove this role from every address it was assigned to.
+        const roles = (await readJson(ROLES_KEY, {})) || {};
+        let changed = false;
+        for (const addr of Object.keys(roles)) {
+          const filtered = (roles[addr] || []).filter((r) => String(r.label || "").toLowerCase() !== label.toLowerCase());
+          if (filtered.length !== (roles[addr] || []).length) {
+            changed = true;
+            if (filtered.length) roles[addr] = filtered; else delete roles[addr];
+          }
+        }
+        if (changed) await writeJson(ROLES_KEY, roles);
+        res.status(200).json({ ok: true, roledefs: without, roles });
+      }
+      return;
+    }
+
+    // Publish your own X25519 public key, so submitters can encrypt apps to you.
+    if (body.publishKey) {
+      const pubkey = String(body.publishKey.pubkey || "").toLowerCase();
+      if (!/^[0-9a-f]{64}$/.test(pubkey)) { res.status(400).json({ error: "bad pubkey" }); return; }
+      const signer = await recover(address, signature, `Bittrees enckey\n${pubkey}\nat ${timestamp}`);
+      if (!signer) { res.status(400).json({ error: "bad signature" }); return; }
+      const keys = (await readJson(ENCKEYS_KEY, {})) || {};
+      keys[signer] = pubkey;
+      await writeJson(ENCKEYS_KEY, keys);
+      res.status(200).json({ ok: true });
+      return;
+    }
+
+    // ── Flag (shareholder-signed) ──────────────────────────────────────────
+    if (body.flag) {
+      const { id, surface, preview } = body.flag;
+      if (!id) { res.status(400).json({ error: "missing item id" }); return; }
+      const signer = await recover(address, signature, `Bittrees flag\n${surface || ""}:${id}\nat ${timestamp}`);
+      if (!signer) { res.status(400).json({ error: "bad signature" }); return; }
+      const vp = await bgovVp(signer);
+      if (vp < 1) { res.status(403).json({ error: "only BGOV holders can flag" }); return; }
+      const flags = (await readJson(FLAGS_KEY, {})) || {};
+      const rec = flags[id] || { by: [], mod: null, surface: surface || "", preview: "" };
+      if (!rec.by.includes(signer)) rec.by.push(signer);
+      if (!rec.preview && preview) rec.preview = String(preview).slice(0, 240);
+      rec.surface = rec.surface || surface || "";
+      flags[id] = rec;
+      await writeJson(FLAGS_KEY, flags);
+      res.status(200).json({ ok: true, flags });
+      return;
+    }
+
+    // ── Unflag (retract own flag) ──────────────────────────────────────────
+    if (body.unflag) {
+      const { id } = body.unflag;
+      if (!id) { res.status(400).json({ error: "missing item id" }); return; }
+      const signer = await recover(address, signature, `Bittrees unflag\n${id}\nat ${timestamp}`);
+      if (!signer) { res.status(400).json({ error: "bad signature" }); return; }
+      const flags = (await readJson(FLAGS_KEY, {})) || {};
+      const rec = flags[id];
+      if (rec) {
+        rec.by = rec.by.filter((a) => a !== signer);
+        if (rec.by.length === 0 && !rec.mod) delete flags[id]; else flags[id] = rec;
+        await writeJson(FLAGS_KEY, flags);
+      }
+      res.status(200).json({ ok: true, flags });
+      return;
+    }
+
+    // ── Moderate (admin/moderator-signed) ──────────────────────────────────
+    if (body.moderate) {
+      const { id, action } = body.moderate; // 'approve' | 'remove' | 'clear'
+      if (!id || !["approve", "remove", "clear"].includes(action)) { res.status(400).json({ error: "bad action" }); return; }
+      const signer = await recover(address, signature, `Bittrees moderate\n${action} ${id}\nat ${timestamp}`);
+      if (!signer) { res.status(400).json({ error: "bad signature" }); return; }
+      const [mods, roles] = await Promise.all([spaceRoles(true), readJson(ROLES_KEY, {})]);
+      if (mods.length === 0) { res.status(503).json({ error: "could not verify moderators" }); return; }
+      if (!mods.includes(signer) && !hasRole(roles, signer, /^(moderator|mod)$/i)) { res.status(403).json({ error: "signer is not a moderator" }); return; }
+      const flags = (await readJson(FLAGS_KEY, {})) || {};
+      const rec = flags[id];
+      if (rec) {
+        if (action === "clear") delete flags[id];
+        else { rec.mod = action === "approve" ? "approved" : "removed"; flags[id] = rec; }
+        await writeJson(FLAGS_KEY, flags);
+      }
+      res.status(200).json({ ok: true, flags });
+      return;
+    }
+
+    res.status(400).json({ error: "unknown action" });
+  } catch (e) {
+    res.status(500).json({ error: String((e && e.message) || e) });
+  }
+}

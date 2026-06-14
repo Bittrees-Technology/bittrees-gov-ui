@@ -1,0 +1,21 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+dist-ssr/
+
+# local env — NEVER commit secrets. RPC / WalletConnect keys live in the host's
+# environment variables (Vercel), not in the repo.
+.env.local
+.env.*.local
+.env
+
+# editor / OS / tooling
+.DS_Store
+*.log
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.vercel
+*.tsbuildinfo

@@ -1,0 +1,325 @@
+/* Bittrees, Inc. — Governance — Design System
+   Shared Bittrees Brand Standard palette (cream / orange / Tinos).
+   ============================================================ */
+
+@import "tailwindcss";
+
+/* `static` so EVERY token is emitted to :root — many are referenced only via
+   var(--color-…) in inline React styles, which Tailwind's class scanner can't
+   see, so without this they'd be tree-shaken out (breaking result bars, success
+   ticks, the Active/Passed badges, etc.). */
+@theme static {
+  /* Typography */
+  --font-logo:  'Georgia Pro', Georgia, serif;
+  --font-serif: 'Times New Roman', Tinos, Times, serif;
+  --font-sans:  system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono:  ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+
+  /* Backgrounds */
+  --color-bg:           #FFFFFF;
+  --color-bg-subtle:    #F7F6F3;
+  --color-bg-card:      #FFFFFF;
+
+  /* Text */
+  --color-ink:          #1A1A1A;
+  --color-ink-muted:    #5C5C5C;
+  --color-ink-dim:      #707070;
+
+  /* Borders */
+  --color-border:       #D8D6D1;
+  --color-border-light: #EAE8E3;
+
+  /* PRIMARY — Bitcoin orange (sparing accent) */
+  --color-primary:        #F7931A;
+  --color-primary-hover:  #E07E00;
+  --color-primary-text:   #1A1A1A;
+
+  /* POSITIVE — green (treasury/positive values) */
+  --color-secondary:      #3A923A;
+  --color-secondary-hover:#2E7A2E;
+  --color-secondary-text: #FFFFFF;
+
+  /* Float / external — gray (NOT blue) */
+  --color-float:      #8A8A8A;
+  --color-float-dim:  #6A6A6A;
+
+  /* Backward-compat aliases */
+  --color-evergreen:       var(--color-secondary);
+  --color-evergreen-mid:   var(--color-secondary-hover);
+  --color-evergreen-light: var(--color-secondary);
+  --color-evergreen-dim:   var(--color-secondary-hover);
+  --color-gold:            var(--color-primary);
+  --color-gold-light:      var(--color-primary);
+  --color-gold-dark:       var(--color-primary-hover);
+  --color-gold-rule:       var(--color-primary);
+  --color-gold-tint:       #F7F6F3;
+  --color-accent:          var(--color-primary);
+  --color-accent-hover:    var(--color-primary-hover);
+  --color-accent-text:     #1A1A1A;
+
+  /* Legacy aliases */
+  --color-parchment:      var(--color-bg);
+  --color-parchment-mid:  var(--color-bg-subtle);
+  --color-parchment-dark: #EDEAE5;
+  --color-ink-faint:      var(--color-ink-dim);
+  --color-org:            var(--color-primary);
+}
+
+/* ============================================================
+   Base reset + globals
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Page H1 / title — serif accent only */
+h1, .page-title {
+  font-family: var(--font-serif);
+  line-height: 1.25;
+  color: var(--color-ink);
+  margin: 0;
+}
+
+/* h2, h3 — sans bold */
+h2, h3, h4, h5, h6 {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--color-ink);
+  margin: 0;
+}
+
+/* Numeric figures: tabular */
+.tabular,
+.font-tabular,
+[data-tabular] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Keep a line unbroken on desktop, but let it wrap on narrow screens. */
+.nowrap-desktop { white-space: nowrap; }
+@media (max-width: 560px) { .nowrap-desktop { white-space: normal; } }
+
+/* ============================================================
+   Focus ring
+   ============================================================ */
+:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   Scrollbar
+   ============================================================ */
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--color-border-light); }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+
+/* ============================================================
+   Typography scale
+   ============================================================ */
+.text-display {
+  font-family: var(--font-serif);
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  color: var(--color-ink);
+}
+
+.text-title {
+  font-family: var(--font-sans);
+  font-size: 1.25rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--color-ink);
+}
+
+.text-label {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-dim);
+}
+
+/* ============================================================
+   Orange rule — decorative separator (sparing)
+   ============================================================ */
+.gold-rule {
+  border: none;
+  border-top: 1px solid var(--color-primary);
+}
+
+/* ============================================================
+   Cards — flat editorial
+   ============================================================ */
+.card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-light);
+  border-radius: 2px;
+  padding: 1.5rem;
+}
+
+.card-subtle {
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border-light);
+  border-radius: 2px;
+}
+
+/* ============================================================
+   Skeleton shimmer
+   ============================================================ */
+@keyframes shimmer {
+  0%   { opacity: 0.45; }
+  50%  { opacity: 0.80; }
+  100% { opacity: 0.45; }
+}
+.skeleton {
+  background: var(--color-parchment-dark);
+  border-radius: 2px;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+/* ============================================================
+   Data table — hairline rows, sans, tabular numbers
+   ============================================================ */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+}
+.data-table th {
+  text-align: left;
+  padding: 0.5rem 1rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-ink-dim);
+  background: var(--color-bg-subtle);
+  border-bottom: 1px solid var(--color-border);
+}
+.data-table th.right { text-align: right; }
+.data-table td {
+  padding: 0.625rem 1rem;
+  border-bottom: 1px solid var(--color-border-light);
+  color: var(--color-ink);
+  vertical-align: middle;
+}
+.data-table td.right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.data-table tbody tr:hover {
+  background: var(--color-bg-subtle);
+  transition: background 0.12s ease;
+}
+.data-table tbody tr:last-child td { border-bottom: none; }
+
+/* ============================================================
+   Buttons
+   ============================================================ */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 1.25rem;
+  background: var(--color-primary);
+  color: #1A1A1A;
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--color-primary);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease;
+  text-decoration: none;
+}
+.btn-primary:hover {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 1.25rem;
+  background: transparent;
+  color: #1A1A1A;
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--color-border);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: background 0.14s ease;
+  text-decoration: none;
+}
+.btn-ghost:hover {
+  background: var(--color-bg-subtle);
+}
+
+/* ============================================================
+   Nav active state — near-black + 2px orange underline
+   ============================================================ */
+.nav-active {
+  color: var(--color-ink) !important;
+  font-weight: 600 !important;
+  border-bottom: 2px solid var(--color-primary) !important;
+}
+
+/* ============================================================
+   Token grid (Overview page)
+   ============================================================ */
+.token-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+}
+@media (min-width: 900px) {
+  .token-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ============================================================
+   Responsive nav helpers
+   ============================================================ */
+.nav-desktop {
+  display: none;
+}
+.nav-mobile-toggle {
+  display: flex;
+}
+@media (min-width: 768px) {
+  .nav-desktop {
+    display: flex;
+  }
+  .nav-mobile-toggle {
+    display: none;
+  }
+}
+
+/* ============================================================
+   RainbowKit theme overrides
+   ============================================================ */
+[data-rk] {
+  font-family: var(--font-sans) !important;
+  --rk-colors-accentColor: #F7931A !important;
+  --rk-colors-accentColorForeground: #1A1A1A !important;
+}
