@@ -183,9 +183,10 @@ function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
 /**
  * Which rooms the connected wallet may access — asks the same `/api/gate` endpoint
  * Push uses to enforce joins (substituting the address for the `{{user_address}}`
- * template). 200 → accessible, 403 → not. Fails OPEN on a network/endpoint error
- * (the join itself is still gated server-side, so a stray show never leaks content).
- * We hide every room whose check is explicitly `false`.
+ * template). Fails CLOSED: a room is visible ONLY when the gate explicitly returns
+ * 200 (access granted). Anything else — 403, a network/endpoint error, or still
+ * loading — keeps the room hidden. So rooms are hidden by default and appear only
+ * once a wallet has been granted access.
  */
 function useRoomAccess(rooms: PushRoom[], address?: string) {
   const keys = rooms.map((r) => r.key).join(",");
@@ -199,9 +200,9 @@ function useRoomAccess(rooms: PushRoom[], address?: string) {
         rooms.map(async (room) => {
           try {
             const r = await fetch(gateUrl(room).replace("{{user_address}}", address!));
-            out[room.key] = r.status === 403 ? false : true;
+            out[room.key] = r.status === 200; // granted only on an explicit 200
           } catch {
-            out[room.key] = true; // fail-open — join stays gated regardless
+            out[room.key] = false; // fail-closed — hide unless access is confirmed
           }
         })
       );
@@ -226,7 +227,7 @@ function CommunityGroups() {
   // Hide rooms the connected wallet can't access (checked against the gate endpoint).
   const allRooms: PushRoom[] = [...bgovRooms, ...safeRooms, ...customRooms];
   const { data: roomAccess, isLoading: accessLoading } = useRoomAccess(allRooms, address);
-  const canSee = (r: PushRoom) => roomAccess?.[r.key] !== false;
+  const canSee = (r: PushRoom) => roomAccess?.[r.key] === true; // hidden unless access confirmed
   const canPropose = useCanProposeRoom(address);
 
   const push = usePush(); // shared, signature-persistent (survives tab switch + reload)
