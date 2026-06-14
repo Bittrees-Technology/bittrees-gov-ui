@@ -1,6 +1,5 @@
 import { Link } from "react-router";
-import { useAccount } from "wagmi";
-import { useProposals, winningChoice, proposalOutcome, useIsAdmin } from "../lib/snapshot";
+import { useProposals, winningChoice, proposalOutcome } from "../lib/snapshot";
 import { StateBadge, OutcomeBadge, ResultBar } from "../components/gov";
 import { fmtNumber, relativeTime, GOV_LINKS, ROUTES } from "../lib/links";
 
@@ -8,8 +7,6 @@ const linkStyle = { color: "var(--color-primary-hover)", textDecoration: "none",
 
 export default function Proposals() {
   const { data: proposals, isLoading, isError } = useProposals(30);
-  const { address } = useAccount();
-  const isAdmin = useIsAdmin(address);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
@@ -20,11 +17,6 @@ export default function Proposals() {
             <h1 className="text-display">Proposals</h1>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "0.85rem", marginTop: "0.4rem", flexWrap: "wrap" }}>
-            {isAdmin && (
-              <Link to={ROUTES.admin} style={{ fontFamily: "var(--font-sans)", fontSize: "0.82rem", fontWeight: 600, color: "var(--color-ink-muted)", textDecoration: "none", whiteSpace: "nowrap" }}>
-                ⚙ Admin
-              </Link>
-            )}
             <Link to={ROUTES.newProposal} className="btn-primary" style={{ textDecoration: "none", whiteSpace: "nowrap" }}>
               New proposal
             </Link>

@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, NavLink, Link } from "react-router";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useState } from "react";
+import { useAccount } from "wagmi";
+import { useIsAdmin } from "./lib/snapshot";
 import Overview from "./pages/Overview";
 import Proposals from "./pages/Proposals";
 import ProposalDetail from "./pages/ProposalDetail";
@@ -65,6 +67,10 @@ export default function App() {
    ============================================================ */
 function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { address } = useAccount();
+  const isAdmin = useIsAdmin(address);
+  // Admin tab — appended to the right of BGOV, visible only to space admins.
+  const nav = isAdmin ? [...NAV, { to: ROUTES.admin, label: "Admin", end: false }] : NAV;
 
   return (
     <header
@@ -114,7 +120,7 @@ function Header() {
 
         {/* Desktop nav */}
         <nav className="nav-desktop" style={{ gap: "0.25rem", flex: 1 }}>
-          {NAV.map(({ to, label, end }) => (
+          {nav.map(({ to, label, end }) => (
             <NavLink
               key={to}
               to={to}
@@ -170,7 +176,7 @@ function Header() {
       {mobileOpen && (
         <div style={{ borderTop: "1px solid var(--color-border)", background: "#ffffff" }} onClick={() => setMobileOpen(false)}>
           <nav style={{ display: "flex", flexDirection: "column" }}>
-            {NAV.map(({ to, label, end }) => (
+            {nav.map(({ to, label, end }) => (
               <NavLink
                 key={to}
                 to={to}
