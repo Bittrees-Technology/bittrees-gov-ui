@@ -7,11 +7,12 @@ import { useQueryClient } from "@tanstack/react-query";
 import { fetchSpaceSettings, updateSpaceSettings } from "../lib/snapshot";
 import { useAdminAccess, type AdminLevel } from "../lib/adminAccess";
 import { BGOV_ROOMS, SAFE_ROOMS, ROOM_ADMINS, initPush, createGatedGroup, gateUrl, gateLabel, type PushRoom, type PushClient, type RoomGate, type RoomRule } from "../lib/push";
-import { useRoomRegistry, saveRoomChatId, saveCustomRoom, deleteCustomRoom } from "../lib/rooms";
+import { useRoomRegistry, saveRoomChatId, saveCustomRoom, deleteCustomRoom, approveRoomProposal, rejectRoomProposal, type RoomProposal } from "../lib/rooms";
 import { assignRole, unassignRole, createRole, deleteRole, selectableRoles, useCommunity, moderateItem, publishEncKey, TIER_ROLES } from "../lib/community";
 import { useTopics, CONTRIB_COMMUNITY, EASSCAN_VIEW } from "../lib/forum";
 import { deriveEncKeypair, decryptApplication, pubKeyHex, type Application, type Envelope, type EncKeypair } from "../lib/appcrypto";
 import { ROUTES, shortAddress, relativeTime } from "../lib/links";
+import { useRoomGate, RoomGateBuilder } from "../components/RoomGateBuilder";
 
 function humanError(e: unknown): string {
   const a = e as { shortMessage?: string; message?: string };
@@ -352,32 +353,74 @@ function CommunityRoomsAdmin({ address }: { address: `0x${string}` }) {
           {error && <p role="alert" style={{ ...dim, color: "var(--color-ink)" }}>{error}</p>}
         </div>
       )}
+      {status === "ready" && pushRef.current && <ProposalReview push={pushRef.current} address={address} />}
       {status === "ready" && pushRef.current && <CustomRoomManager push={pushRef.current} address={address} />}
     </section>
   );
 }
 
-/* ── Custom rooms — admin-defined, with custom gatekeeping ────────────────── */
-type RuleType = "erc20" | "erc721" | "safe" | "ens" | "bgov" | "role";
-interface RuleDraft { type: RuleType; tier: string; safe: string; token: string; min: string; decimals: string; ens: string; role: string }
-const emptyRule = (): RuleDraft => ({ type: "erc20", tier: "69", safe: "", token: "", min: "1", decimals: "18", ens: "", role: "" });
-function toRule(d: RuleDraft): RoomRule | null {
-  try {
-    if (d.type === "role") return d.role.trim() ? { kind: "role", role: d.role.trim() } : null;
-    if (d.type === "bgov") return { kind: "bgov", tier: Math.max(0, Number(d.tier) || 0) };
-    if (d.type === "safe") return isAddress(d.safe.trim()) ? { kind: "safe", safe: getAddress(d.safe.trim()) } : null;
-    if (d.type === "ens") {
-      const n = d.ens.trim().toLowerCase();
-      if (!n) return { kind: "ens" }; // blank = any ENS name
-      return /\./.test(n) ? { kind: "ens", name: n } : null;
+/* ── Pending room proposals — review queue for role-holder submissions ─────── */
+function ProposalReview({ push, address }: { push: PushClient; address: `0x${string}` }) {
+  const { data: walletClient } = useWalletClient();
+  const { data: registry } = useRoomRegistry();
+  const qc = useQueryClient();
+  const proposals: RoomProposal[] = registry?.proposals ?? [];
+  const [busyId, setBusyId] = useState<string>();
+  const [error, setError] = useState<string>();
+
+  async function approve(p: RoomProposal) {
+    if (!walletClient) return;
+    setBusyId(p.id);
+    setError(undefined);
+    try {
+      const slug = p.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || "room";
+      const key = `custom-${slug}-${Math.random().toString(36).slice(2, 7)}`;
+      const room: PushRoom = { key, name: p.name.slice(0, 80), blurb: p.blurb || gateLabel(p.gate), gate: p.gate };
+      const chatId = await createGatedGroup(push, room, address);
+      await approveRoomProposal({ walletClient, account: address, proposalId: p.id, room: { ...room, chatId } });
+      qc.invalidateQueries({ queryKey: ["room-registry"] });
+    } catch (e) {
+      setError(humanError(e));
+    } finally {
+      setBusyId(undefined);
     }
-    if (d.type === "erc20") return isAddress(d.token.trim()) ? { kind: "token", standard: "erc20", token: getAddress(d.token.trim()), min: parseUnits(d.min.trim() || "0", Number(d.decimals) || 18).toString() } : null;
-    return isAddress(d.token.trim()) ? { kind: "token", standard: "erc721", token: getAddress(d.token.trim()), min: String(Math.max(1, Math.floor(Number(d.min) || 1))) } : null;
-  } catch {
-    return null;
   }
+  async function reject(p: RoomProposal) {
+    if (!walletClient) return;
+    setBusyId(p.id);
+    setError(undefined);
+    try {
+      await rejectRoomProposal({ walletClient, account: address, proposalId: p.id });
+      qc.invalidateQueries({ queryKey: ["room-registry"] });
+    } catch (e) {
+      setError(humanError(e));
+    } finally {
+      setBusyId(undefined);
+    }
+  }
+
+  if (proposals.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", borderTop: "1px solid var(--color-border)", paddingTop: "1.1rem" }}>
+      <p className="text-label">Pending room proposals ({proposals.length})</p>
+      {proposals.map((p) => (
+        <div key={p.id} className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
+          <div>
+            <p style={{ fontFamily: "var(--font-serif)", fontSize: "0.95rem", fontWeight: 700, color: "var(--color-ink)", margin: 0 }}>{p.name}</p>
+            <p style={{ ...dim, margin: "0.15rem 0 0" }}>{gateLabel(p.gate)} · proposed by {shortAddress(p.by)}</p>
+          </div>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button className="btn-primary" disabled={!!busyId} onClick={() => approve(p)} style={{ opacity: busyId ? 0.6 : 1 }}>{busyId === p.id ? "Approving…" : "Approve"}</button>
+            <button onClick={() => reject(p)} disabled={!!busyId} style={{ ...createBtn, color: "#9a2a2a", borderColor: "#e2b8b8" }}>Reject</button>
+          </div>
+        </div>
+      ))}
+      {error && <p role="alert" style={{ ...dim, color: "var(--color-ink)", margin: 0 }}>{error}</p>}
+    </div>
+  );
 }
 
+/* ── Custom rooms — admin-defined, with custom gatekeeping ────────────────── */
 function CustomRoomManager({ push, address }: { push: PushClient; address: `0x${string}` }) {
   const { data: walletClient } = useWalletClient();
   const { data: registry } = useRoomRegistry();
@@ -386,18 +429,11 @@ function CustomRoomManager({ push, address }: { push: PushClient; address: `0x${
   const custom = registry?.custom ?? [];
   const roleOptions = selectableRoles(community?.roledefs);
 
+  const gb = useRoomGate();
   const [name, setName] = useState("");
-  const [combine, setCombine] = useState<"any" | "all">("any");
-  const [rules, setRules] = useState<RuleDraft[]>([emptyRule()]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-
-  function setRule(i: number, patch: Partial<RuleDraft>) {
-    setRules((cur) => cur.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  }
-  const builtRules = rules.map(toRule).filter((r): r is RoomRule => !!r);
-  const gate: RoomGate = { kind: "multi", combine, rules: builtRules };
-  const canCreate = name.trim().length > 0 && builtRules.length > 0;
+  const canCreate = name.trim().length > 0 && gb.valid;
 
   async function create() {
     if (!walletClient || !canCreate) { setError("Add a room name and at least one valid rule."); return; }
@@ -406,13 +442,12 @@ function CustomRoomManager({ push, address }: { push: PushClient; address: `0x${
     try {
       const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || "room";
       const key = `custom-${slug}-${Math.random().toString(36).slice(2, 7)}`;
-      const room: PushRoom = { key, name: name.trim().slice(0, 80), blurb: gateLabel(gate), gate };
+      const room: PushRoom = { key, name: name.trim().slice(0, 80), blurb: gateLabel(gb.gate), gate: gb.gate };
       const chatId = await createGatedGroup(push, room, address);
       await saveCustomRoom({ walletClient, account: address, room: { ...room, chatId } });
       qc.invalidateQueries({ queryKey: ["room-registry"] });
       setName("");
-      setRules([emptyRule()]);
-      setCombine("any");
+      gb.reset();
     } catch (e) {
       setError(humanError(e));
     } finally {
@@ -446,59 +481,9 @@ function CustomRoomManager({ push, address }: { push: PushClient; address: `0x${
       <div className="card" style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Room name" maxLength={80} style={inputStyle} />
 
-        {rules.length > 1 && (
-          <label style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", ...dim }}>
-            Admit if
-            <select value={combine} onChange={(e) => setCombine(e.target.value as "any" | "all")} style={{ ...inputStyle, width: "auto" }}>
-              <option value="any">any</option>
-              <option value="all">all</option>
-            </select>
-            of these match:
-          </label>
-        )}
-
-        {rules.map((r, i) => (
-          <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
-            <select value={r.type} onChange={(e) => setRule(i, { type: e.target.value as RuleType })} style={{ ...inputStyle, width: "auto" }}>
-              <option value="role">Role</option>
-              <option value="bgov">BGOV</option>
-              <option value="safe">Safe signers</option>
-              <option value="ens">ENS name</option>
-              <option value="erc20">Token (ERC-20)</option>
-              <option value="erc721">NFT (ERC-721)</option>
-            </select>
-            {r.type === "role" && (
-              <select value={r.role} onChange={(e) => setRule(i, { role: e.target.value })} style={{ ...inputStyle, width: "auto", minWidth: "160px" }}>
-                <option value="">Select a role…</option>
-                {roleOptions.map((o) => <option key={o.label} value={o.label}>{o.label}</option>)}
-              </select>
-            )}
-            {r.type === "bgov" && (
-              <input value={r.tier} onChange={(e) => setRule(i, { tier: e.target.value })} type="number" min={0} placeholder="Min BGOV" style={{ ...inputStyle, width: "110px" }} />
-            )}
-            {r.type === "safe" && (
-              <input value={r.safe} onChange={(e) => setRule(i, { safe: e.target.value })} placeholder="Safe 0x address" style={{ ...inputStyle, flex: 1, minWidth: "180px", fontFamily: "var(--font-mono)", fontSize: "0.8rem" }} />
-            )}
-            {r.type === "ens" && (
-              <input value={r.ens} onChange={(e) => setRule(i, { ens: e.target.value })} placeholder="name.eth — or blank for any ENS name" style={{ ...inputStyle, flex: 1, minWidth: "200px" }} />
-            )}
-            {(r.type === "erc20" || r.type === "erc721") && (
-              <>
-                <input value={r.token} onChange={(e) => setRule(i, { token: e.target.value })} placeholder="Token 0x address" style={{ ...inputStyle, flex: 1, minWidth: "160px", fontFamily: "var(--font-mono)", fontSize: "0.8rem" }} />
-                <input value={r.min} onChange={(e) => setRule(i, { min: e.target.value })} placeholder={r.type === "erc20" ? "Min amount" : "Min count"} style={{ ...inputStyle, width: "100px" }} />
-                {r.type === "erc20" && (
-                  <input value={r.decimals} onChange={(e) => setRule(i, { decimals: e.target.value })} type="number" min={0} title="Token decimals" placeholder="Dec" style={{ ...inputStyle, width: "80px" }} />
-                )}
-              </>
-            )}
-            {rules.length > 1 && (
-              <button onClick={() => setRules((cur) => cur.filter((_, j) => j !== i))} aria-label="Remove rule" style={{ background: "none", border: "none", cursor: "pointer", color: "#9a2a2a", fontSize: "1rem", lineHeight: 1, padding: 0 }}>×</button>
-            )}
-          </div>
-        ))}
+        <RoomGateBuilder gate={gb} roleOptions={roleOptions} />
 
         <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
-          <button type="button" onClick={() => setRules((cur) => [...cur, emptyRule()])} style={createBtn}>+ Add rule</button>
           <button className="btn-primary" disabled={!canCreate || busy} onClick={create} style={{ opacity: !canCreate || busy ? 0.55 : 1 }}>
             {busy ? "Creating…" : "Create & publish"}
           </button>

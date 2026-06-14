@@ -27,3 +27,15 @@ export function useAdminAccess(address?: string): AdminLevel {
   if (roles.some((r) => MOD_ROLE_RE.test(r.label))) return "moderation";
   return "none";
 }
+
+/** Roles allowed to PROPOSE a room (pending admin approval): Operations + the tier roles. */
+const PROPOSE_ROLE_RE = /^(operations|partner|junior partner|associate)$/i;
+
+/** Whether `address` may propose a community room (a proposer role, or a full admin). */
+export function useCanProposeRoom(address?: string): boolean {
+  const level = useAdminAccess(address);
+  const roles = useUserRoles(address);
+  if (!address) return false;
+  if (level === "full") return true;
+  return roles.some((r) => PROPOSE_ROLE_RE.test(r.label));
+}

@@ -22,6 +22,8 @@ import {
 } from "../lib/push";
 import { usePush } from "../lib/usePush";
 import { useRoomRegistry } from "../lib/rooms";
+import { useCanProposeRoom } from "../lib/adminAccess";
+import { ProposeRoom } from "../components/ProposeRoom";
 import { UserBadges } from "../components/badges";
 import { FlagButton, HiddenNotice } from "../components/moderation";
 import { useItemModeration } from "../lib/community";
@@ -225,6 +227,7 @@ function CommunityGroups() {
   const allRooms: PushRoom[] = [...bgovRooms, ...safeRooms, ...customRooms];
   const { data: roomAccess, isLoading: accessLoading } = useRoomAccess(allRooms, address);
   const canSee = (r: PushRoom) => roomAccess?.[r.key] !== false;
+  const canPropose = useCanProposeRoom(address);
 
   const push = usePush(); // shared, signature-persistent (survives tab switch + reload)
   const [error, setError] = useState<string>();
@@ -351,6 +354,8 @@ function CommunityGroups() {
           ))}
         </div>
       )}
+
+      {canPropose && <ProposeRoom address={address!} />}
 
       {error && <p role="alert" style={{ ...dim, color: "var(--color-ink)" }}>{error}</p>}
     </div>

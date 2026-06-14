@@ -1,6 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import type { WalletClient } from "viem";
-import type { PushRoom } from "./push";
+import type { PushRoom, RoomGate } from "./push";
+
+/** A pending room request submitted by a role-holder, awaiting admin approval. */
+export interface RoomProposal { id: string; name: string; blurb: string; gate: RoomGate; by: string; at: number }
 
 /**
  * Community-room registry client. The deployed `/api/rooms` (Vercel KV) stores
@@ -16,6 +19,7 @@ export type RoomRegistry = Record<string, string>; // roomKey -> chatId
 export interface RegistryData {
   chatIds: RoomRegistry;
   custom: PushRoom[];
+  proposals: RoomProposal[];
 }
 
 export function useRoomRegistry() {
@@ -25,11 +29,15 @@ export function useRoomRegistry() {
     queryFn: async (): Promise<RegistryData> => {
       try {
         const r = await fetch(ROOMS_URL);
-        if (!r.ok) return { chatIds: {}, custom: [] };
+        if (!r.ok) return { chatIds: {}, custom: [], proposals: [] };
         const j = await r.json();
-        return { chatIds: (j?.rooms ?? {}) as RoomRegistry, custom: (j?.custom ?? []) as PushRoom[] };
+        return {
+          chatIds: (j?.rooms ?? {}) as RoomRegistry,
+          custom: (j?.custom ?? []) as PushRoom[],
+          proposals: (j?.proposals ?? []) as RoomProposal[],
+        };
       } catch {
-        return { chatIds: {}, custom: [] };
+        return { chatIds: {}, custom: [], proposals: [] };
       }
     },
   });
@@ -83,4 +91,37 @@ export async function deleteCustomRoom(opts: {
 }): Promise<void> {
   const { walletClient, account, key } = opts;
   await postSigned(walletClient, account, `Bittrees rooms registry\ndelete-custom ${key}`, { deleteCustom: key });
+}
+
+/** Role-holder: propose a room (name + gate) for an admin to approve. */
+export async function proposeRoom(opts: {
+  walletClient: WalletClient;
+  account: `0x${string}`;
+  name: string;
+  blurb: string;
+  gate: RoomGate;
+}): Promise<void> {
+  const { walletClient, account, name, blurb, gate } = opts;
+  await postSigned(walletClient, account, `Bittrees room proposal\n${name}`, { proposal: { name, blurb, gate } });
+}
+
+/** Admin: approve a proposal — pass the created room (with its Push chatId). */
+export async function approveRoomProposal(opts: {
+  walletClient: WalletClient;
+  account: `0x${string}`;
+  proposalId: string;
+  room: PushRoom;
+}): Promise<void> {
+  const { walletClient, account, proposalId, room } = opts;
+  await postSigned(walletClient, account, `Bittrees room approve\n${proposalId}`, { approve: { proposalId, room } });
+}
+
+/** Admin: reject (drop) a proposal. */
+export async function rejectRoomProposal(opts: {
+  walletClient: WalletClient;
+  account: `0x${string}`;
+  proposalId: string;
+}): Promise<void> {
+  const { walletClient, account, proposalId } = opts;
+  await postSigned(walletClient, account, `Bittrees room reject\n${proposalId}`, { reject: proposalId });
 }
