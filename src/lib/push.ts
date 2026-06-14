@@ -65,16 +65,15 @@ function encodeGate(gate: object): string {
 }
 
 /**
- * BGOV-tier rooms. Shareholders is automatic (≥1 BGOV). The upper three admit a
- * wallet that EITHER holds ≥the threshold BGOV OR has been assigned the matching
- * role (Associate / Junior Partner / Partner) — so holders unlock automatically
- * and admins can hand-grant access to specific non-holders.
+ * BGOV-tier rooms. Shareholders is automatic (anyone holding ≥1 BGOV). The upper
+ * three are gated SOLELY by the manually-assigned role (Associate / Junior Partner
+ * / Partner) — BGOV holdings do NOT grant access; an admin assigns the role per user.
  */
 export const BGOV_ROOMS: PushRoom[] = [
   { key: "shareholders", name: "Shareholders", blurb: "≥1 BGOV", gate: { kind: "bgov", tier: 1 }, envKey: "VITE_PUSH_ROOM_SHAREHOLDERS", chatId: import.meta.env.VITE_PUSH_ROOM_SHAREHOLDERS as string | undefined },
-  { key: "associates", name: "Associates", blurb: "≥69 BGOV or Associate role", gate: { kind: "multi", combine: "any", rules: [{ kind: "bgov", tier: 69 }, { kind: "role", role: "Associate" }] }, envKey: "VITE_PUSH_ROOM_ASSOCIATES", chatId: import.meta.env.VITE_PUSH_ROOM_ASSOCIATES as string | undefined },
-  { key: "junior-partners", name: "Junior Partners", blurb: "≥210 BGOV or Junior Partner role", gate: { kind: "multi", combine: "any", rules: [{ kind: "bgov", tier: 210 }, { kind: "role", role: "Junior Partner" }] }, envKey: "VITE_PUSH_ROOM_JUNIOR", chatId: import.meta.env.VITE_PUSH_ROOM_JUNIOR as string | undefined },
-  { key: "partners", name: "Partners", blurb: "≥420 BGOV or Partner role", gate: { kind: "multi", combine: "any", rules: [{ kind: "bgov", tier: 420 }, { kind: "role", role: "Partner" }] }, envKey: "VITE_PUSH_ROOM_PARTNERS", chatId: import.meta.env.VITE_PUSH_ROOM_PARTNERS as string | undefined },
+  { key: "associates", name: "Associates", blurb: "Associate role", gate: { kind: "role", role: "Associate" }, envKey: "VITE_PUSH_ROOM_ASSOCIATES", chatId: import.meta.env.VITE_PUSH_ROOM_ASSOCIATES as string | undefined },
+  { key: "junior-partners", name: "Junior Partners", blurb: "Junior Partner role", gate: { kind: "role", role: "Junior Partner" }, envKey: "VITE_PUSH_ROOM_JUNIOR", chatId: import.meta.env.VITE_PUSH_ROOM_JUNIOR as string | undefined },
+  { key: "partners", name: "Partners", blurb: "Partner role", gate: { kind: "role", role: "Partner" }, envKey: "VITE_PUSH_ROOM_PARTNERS", chatId: import.meta.env.VITE_PUSH_ROOM_PARTNERS as string | undefined },
 ];
 
 // chatId + env-var name for each Safe-gated subname room. Literal env reads (Vite

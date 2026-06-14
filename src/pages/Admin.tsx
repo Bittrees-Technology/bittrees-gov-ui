@@ -631,11 +631,8 @@ function RolesAdmin({ address }: { address: `0x${string}` }) {
           <strong>Shareholder</strong> (≥1 BGOV) is automatic — no assignment needed.
         </p>
         <p style={{ ...dim, margin: 0, lineHeight: 1.55 }}>
-          <strong>{TIER_ROLES.map((t) => t.label).join(", ")}</strong> are assigned per user (above).
-          Their rooms also admit anyone holding{" "}
-          {TIER_ROLES.map((t, i) => (
-            <span key={t.label}>{i > 0 ? " / " : ""}≥{t.min} BGOV ({t.label})</span>
-          ))}.
+          <strong>{TIER_ROLES.map((t) => t.label).join(", ")}</strong> are assigned per user (above) —
+          their rooms admit only wallets you've assigned the role. BGOV holdings don't grant access.
         </p>
       </div>
 

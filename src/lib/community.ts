@@ -67,7 +67,7 @@ export function useRoleDefs(): { data: RoleDef[] | undefined } {
 export function selectableRoles(defs: RoleDef[] | undefined): RoleDef[] {
   const byLabel = new Map<string, RoleDef>();
   for (const k of KNOWN_ROLES) byLabel.set(k.label.toLowerCase(), { label: k.label, color: k.color, description: k.grants, locked: true });
-  for (const t of TIER_ROLES) byLabel.set(t.label.toLowerCase(), { label: t.label, color: t.color, description: `Tier role — its room also admits ≥${t.min} BGOV.`, locked: true });
+  for (const t of TIER_ROLES) byLabel.set(t.label.toLowerCase(), { label: t.label, color: t.color, description: `Tier role — assign per user; gates the ${t.label}s room.`, locked: true });
   for (const d of defs ?? []) {
     const key = String(d.label || "").toLowerCase();
     if (!key) continue;
@@ -164,13 +164,13 @@ export function tierFor(vp: number): Tier {
 
 /**
  * Manually-assigned tier roles — built-in (non-deletable), assigned per user in
- * Admin → Roles & tags. `min` is the BGOV threshold the matching room ALSO admits:
- * the Associates / Junior Partners / Partners rooms open to the role OR ≥min BGOV.
+ * Admin → Roles & tags. Their rooms (Associates / Junior Partners / Partners) are
+ * gated SOLELY by the assigned role — BGOV holdings do NOT grant access.
  */
-export const TIER_ROLES: { label: string; min: number; color: string }[] = [
-  { label: "Partner", min: 420, color: "#B8860B" },
-  { label: "Junior Partner", min: 210, color: "#7C6F9B" },
-  { label: "Associate", min: 69, color: "#2F8F5B" },
+export const TIER_ROLES: { label: string; color: string }[] = [
+  { label: "Partner", color: "#B8860B" },
+  { label: "Junior Partner", color: "#7C6F9B" },
+  { label: "Associate", color: "#2F8F5B" },
 ];
 
 /**
