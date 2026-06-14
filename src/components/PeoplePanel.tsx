@@ -24,14 +24,17 @@ export function PeoplePanel({ onMessage }: { onMessage: (address: string) => voi
   const contacts = useContacts();
 
   const [search, setSearch] = useState("");
+  const [open, setOpen] = useState(false);
   const [addInput, setAddInput] = useState("");
   const [adding, setAdding] = useState(false);
   const [err, setErr] = useState<string>();
 
   const q = search.trim().toLowerCase();
-  const directory = Object.entries(roles)
-    .filter(([addr, list]) => !q || addr.toLowerCase().includes(q) || (list ?? []).some((r) => r.label.toLowerCase().includes(q)))
-    .slice(0, 60);
+  const matches = q
+    ? Object.entries(roles)
+        .filter(([addr, list]) => addr.toLowerCase().includes(q) || (list ?? []).some((r) => r.label.toLowerCase().includes(q)))
+        .slice(0, 40)
+    : [];
 
   async function add() {
     const v = addInput.trim();
@@ -84,20 +87,38 @@ export function PeoplePanel({ onMessage }: { onMessage: (address: string) => voi
         </div>
       )}
 
-      {/* Role-searchable directory */}
-      <input
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Search people by role (e.g. Partner) or address"
-        style={inputStyle}
-      />
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem", maxHeight: "260px", overflowY: "auto" }}>
-        {directory.length === 0 ? (
-          <p style={{ ...dim, margin: 0 }}>{q ? "No one matches that." : "No assigned roles yet."}</p>
-        ) : (
-          directory.map(([addr]) => (
-            <PersonRow key={addr} address={addr} onMessage={onMessage} saved={isContact(addr)} onToggleContact={() => (isContact(addr) ? removeContact(addr) : addContact(getAddress(addr)))} />
-          ))
+      {/* Role-searchable directory — a search dropdown, not a full list */}
+      <div style={{ position: "relative" }}>
+        <input
+          value={search}
+          onChange={(e) => { setSearch(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
+          placeholder="Search people by role (e.g. Partner) or address"
+          style={inputStyle}
+        />
+        {open && !!q && (
+          // preventDefault on mousedown keeps the input focused so clicking a result
+          // doesn't blur-close the dropdown before the click registers.
+          <div
+            onMouseDown={(e) => e.preventDefault()}
+            style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 30, background: "#ffffff", border: "1px solid var(--color-border)", borderRadius: "2px", boxShadow: "0 8px 24px rgba(0,0,0,0.12)", maxHeight: "280px", overflowY: "auto", padding: "0 0.6rem" }}
+          >
+            {matches.length === 0 ? (
+              <p style={{ ...dim, margin: 0, padding: "0.55rem 0.1rem" }}>No one matches “{search.trim()}”.</p>
+            ) : (
+              matches.map(([addr]) => (
+                <PersonRow
+                  key={addr}
+                  address={addr}
+                  onMessage={(a) => { onMessage(a); setSearch(""); setOpen(false); }}
+                  saved={isContact(addr)}
+                  onToggleContact={() => (isContact(addr) ? removeContact(addr) : addContact(getAddress(addr)))}
+                />
+              ))
+            )}
+          </div>
         )}
       </div>
     </div>
