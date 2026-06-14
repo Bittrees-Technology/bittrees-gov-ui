@@ -46,6 +46,9 @@ Serverless (the gating function): `MAINNET_RPC_URL` (optional; falls back to a p
 
 ## Deploy notes
 
+See **[DEPLOY.md](./DEPLOY.md)** for the full step-by-step (Vercel import, env vars,
+Upstash Redis, domain, and the post-deploy admin steps). In brief:
+
 - Vercel project pointed at `gov.bittrees.org`. `vercel.json` rewrites all non-`/api`
   routes to the SPA; the gating function lives at `api/gate/[...path].js`.
 - **Forum/contributor** auto-register their EAS schema on Base on the first post — no
