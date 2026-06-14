@@ -45,15 +45,59 @@ export default function Admin() {
           </p>
         </div>
       ) : (
-        <>
-          <SpaceSettings address={address!} />
-          <CommunityRoomsAdmin address={address!} />
-          <RolesAdmin address={address!} />
-          <ModerationQueue address={address!} />
-          <ContributorApplications />
-        </>
+        <AdminConsole address={address!} />
       )}
     </div>
+  );
+}
+
+/* ── Tabbed admin console — each area managed on its own tab ──────────────── */
+const ADMIN_TABS = [
+  { key: "settings", label: "Space settings" },
+  { key: "rooms", label: "Community rooms" },
+  { key: "roles", label: "Roles & tags" },
+  { key: "moderation", label: "Moderation" },
+  { key: "applications", label: "Contributor applications" },
+] as const;
+type AdminTabKey = (typeof ADMIN_TABS)[number]["key"];
+
+function AdminConsole({ address }: { address: `0x${string}` }) {
+  const [tab, setTab] = useState<AdminTabKey>("settings");
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+      <div style={{ display: "flex", gap: "0.15rem", borderBottom: "1px solid var(--color-border)", flexWrap: "wrap" }}>
+        {ADMIN_TABS.map((t) => (
+          <AdminTabBtn key={t.key} active={tab === t.key} onClick={() => setTab(t.key)}>{t.label}</AdminTabBtn>
+        ))}
+      </div>
+      {tab === "settings" && <SpaceSettings address={address} />}
+      {tab === "rooms" && <CommunityRoomsAdmin address={address} />}
+      {tab === "roles" && <RolesAdmin address={address} />}
+      {tab === "moderation" && <ModerationQueue address={address} />}
+      {tab === "applications" && <ContributorApplications />}
+    </div>
+  );
+}
+
+function AdminTabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        fontFamily: "var(--font-sans)",
+        fontSize: "0.85rem",
+        fontWeight: active ? 600 : 400,
+        color: active ? "var(--color-ink)" : "var(--color-ink-muted)",
+        background: "none",
+        border: "none",
+        borderBottom: `2px solid ${active ? "var(--color-primary)" : "transparent"}`,
+        padding: "0.5rem 0.8rem",
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </button>
   );
 }
 
