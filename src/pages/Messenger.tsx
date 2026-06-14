@@ -120,7 +120,7 @@ function DirectMessages() {
     );
   }
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+    <div className="dm-layout">
       <PeoplePanel onMessage={(addr) => { void xmtp.startDm(addr); }} />
       <Chat xmtp={xmtp} />
     </div>

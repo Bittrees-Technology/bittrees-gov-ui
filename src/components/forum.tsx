@@ -7,8 +7,9 @@ import { base, wagmiConfig } from "../lib/chains";
 import { getWalletClient } from "@wagmi/core";
 import { publishPost, useSchemaRegistered, EASSCAN_VIEW, type ForumPost } from "../lib/forum";
 import { useVotingPowerNow } from "../lib/snapshot";
-import { shortAddress, relativeTime, fmtNumber, ROUTES } from "../lib/links";
+import { relativeTime, fmtNumber, ROUTES } from "../lib/links";
 import { UserBadges } from "./badges";
+import { AddressName } from "./AddressName";
 import { FlagButton, HiddenNotice } from "./moderation";
 import { useItemModeration } from "../lib/community";
 
@@ -59,7 +60,7 @@ export function PostCard({ post, linkToThread, replyCount }: { post: ForumPost; 
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: "0.85rem", margin: "0.6rem 0 0", flexWrap: "wrap" }}>
         <a href={`${EASSCAN_VIEW}${post.id}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={{ color: "var(--color-ink-dim)", textDecoration: "none", fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}>
-          {shortAddress(post.attester)}
+          <AddressName address={post.attester} />
         </a>
         <span style={{ fontFamily: "var(--font-sans)", fontSize: "0.72rem", color: "var(--color-ink-dim)" }}>{relativeTime(post.time)}</span>
         <FlagButton id={post.id} surface="forum" preview={post.title || post.body} />

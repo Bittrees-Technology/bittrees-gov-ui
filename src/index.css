@@ -315,6 +315,20 @@ h2, h3, h4, h5, h6 {
   }
 }
 
+/* Direct messages: People (contacts + search) partitioned to the left of the chat
+   on wide screens; stacked on narrow ones. */
+.dm-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+@media (min-width: 860px) {
+  .dm-layout {
+    grid-template-columns: minmax(240px, 300px) 1fr;
+  }
+}
+
 /* ============================================================
    RainbowKit theme overrides
    ============================================================ */

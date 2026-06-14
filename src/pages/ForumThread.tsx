@@ -2,8 +2,9 @@ import { Link, useParams } from "react-router";
 import { useThread } from "../lib/forum";
 import { Composer, PostCard, LinkifiedText } from "../components/forum";
 import { UserBadges } from "../components/badges";
+import { AddressName } from "../components/AddressName";
 import { EASSCAN_VIEW } from "../lib/forum";
-import { shortAddress, relativeTime, ROUTES } from "../lib/links";
+import { relativeTime, ROUTES } from "../lib/links";
 import { useAccount } from "wagmi";
 import { FlagButton, HiddenNotice } from "../components/moderation";
 import { useItemModeration } from "../lib/community";
@@ -35,7 +36,7 @@ export default function ForumThread() {
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "0.85rem", flexWrap: "wrap", fontFamily: "var(--font-sans)", fontSize: "0.72rem", color: "var(--color-ink-dim)" }}>
               <a href={`${EASSCAN_VIEW}${root.id}`} target="_blank" rel="noreferrer" style={{ color: "var(--color-ink-dim)", textDecoration: "none", fontFamily: "var(--font-mono)" }}>
-                {shortAddress(root.attester)}
+                <AddressName address={root.attester} />
               </a>
               <span>{relativeTime(root.time)}</span>
               <FlagButton id={root.id} surface="forum" preview={root.title || root.body} />

@@ -13,6 +13,11 @@ import { useTopics, CONTRIB_COMMUNITY, EASSCAN_VIEW } from "../lib/forum";
 import { deriveEncKeypair, decryptApplication, pubKeyHex, type Application, type Envelope, type EncKeypair } from "../lib/appcrypto";
 import { ROUTES, shortAddress, relativeTime } from "../lib/links";
 import { useRoomGate, RoomGateBuilder } from "../components/RoomGateBuilder";
+import { AddressName } from "../components/AddressName";
+import { getEnsAddress } from "@wagmi/core";
+import { normalize } from "viem/ens";
+import { mainnet } from "viem/chains";
+import { wagmiConfig } from "../lib/chains";
 
 function humanError(e: unknown): string {
   const a = e as { shortMessage?: string; message?: string };
@@ -537,14 +542,21 @@ function RolesAdmin({ address }: { address: `0x${string}` }) {
 
   const options = selectableRoles(roledefs);
   const selected = options.find((o) => o.label === label);
-  const canAssign = isAddress(target.trim()) && !!selected;
+  const canAssign = (isAddress(target.trim()) || target.trim().includes(".")) && !!selected;
 
   async function assign() {
-    if (!walletClient || !selected || !isAddress(target.trim())) { setError("Pick a role and enter a valid address."); return; }
+    if (!walletClient || !selected) { setError("Pick a role and enter an address or ENS name."); return; }
     setBusy(true);
     setError(undefined);
     try {
-      await assignRole({ walletClient, account: address, target: getAddress(target.trim()), label: selected.label, color: selected.color });
+      let t = target.trim();
+      if (t.includes(".")) {
+        const resolved = await getEnsAddress(wagmiConfig, { name: normalize(t), chainId: mainnet.id });
+        if (!resolved) throw new Error("That ENS name doesn't resolve to an address.");
+        t = resolved;
+      }
+      if (!isAddress(t)) throw new Error("Enter a valid 0x address or ENS name.");
+      await assignRole({ walletClient, account: address, target: getAddress(t), label: selected.label, color: selected.color });
       qc.invalidateQueries({ queryKey: ["community"] });
       setTarget("");
       setLabel("");
@@ -642,7 +654,7 @@ function RolesAdmin({ address }: { address: `0x${string}` }) {
       <div className="card" style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
         <p className="text-label" style={{ margin: 0 }}>Assign a role</p>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.6rem", alignItems: "center" }}>
-          <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="0x address" style={{ ...inputStyle, flex: 1, minWidth: "220px", fontFamily: "var(--font-mono)", fontSize: "0.8rem" }} />
+          <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="0x address or name.eth" style={{ ...inputStyle, flex: 1, minWidth: "220px", fontSize: "0.8rem" }} />
           <select value={label} onChange={(e) => setLabel(e.target.value)} style={{ ...inputStyle, width: "210px" }}>
             <option value="">Select a role…</option>
             {options.map((o) => <option key={o.label} value={o.label}>{o.label}</option>)}
@@ -672,7 +684,7 @@ function RolesAdmin({ address }: { address: `0x${string}` }) {
         <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           {entries.map(([addr, list]) => (
             <div key={addr} className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", color: "var(--color-ink-muted)" }}>{shortAddress(addr)}</span>
+              <AddressName address={addr} avatar />
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
                 {list.map((r) => (
                   <span key={r.label} style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}>
