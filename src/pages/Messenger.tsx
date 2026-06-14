@@ -42,9 +42,9 @@ export default function Messenger() {
         <p className="text-label">Bittrees, Inc.</p>
         <h1 className="text-display">Messenger</h1>
         <p style={{ fontFamily: "var(--font-sans)", fontSize: "0.9375rem", color: "var(--color-ink-muted)", maxWidth: "660px", lineHeight: 1.6, marginTop: "0.5rem" }}>
-          Wallet-native messaging — no phone number, no account. Encrypted 1:1 <strong>direct
-          messages</strong> over XMTP, plus token-gated <strong>community rooms</strong> for BGOV
-          holders.
+          Wallet-native messaging — no phone number, no account.<br />
+          Encrypted 1:1 <strong>direct messages</strong> over XMTP,<br />
+          plus token-gated <strong>community rooms</strong>
         </p>
       </header>
 
