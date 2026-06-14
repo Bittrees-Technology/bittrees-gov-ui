@@ -178,6 +178,6 @@ export const TIER_ROLES: { label: string; color: string }[] = [
  * Roles & tags). Any other label is a display-only badge.
  */
 export const KNOWN_ROLES: { label: string; grants: string; color: string }[] = [
-  { label: "operations", grants: "Review private contributor applications.", color: "#2563EB" },
-  { label: "moderator", grants: "Moderate community-flagged posts & messages (approve / remove).", color: "#7C3AED" },
+  { label: "Operations", grants: "Review private contributor applications.", color: "#2563EB" },
+  { label: "Moderator", grants: "Moderate community-flagged posts & messages (approve / remove).", color: "#7C3AED" },
 ];

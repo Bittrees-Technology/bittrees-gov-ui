@@ -647,7 +647,7 @@ function RolesAdmin({ address }: { address: `0x${string}` }) {
             </div>
           ))}
         </div>
-        <p style={{ ...dim, margin: 0 }}>Deleting a role also removes it from everyone it was assigned to. <code style={mono}>operations</code> + <code style={mono}>moderator</code> are built in and carry powers.</p>
+        <p style={{ ...dim, margin: 0 }}>Deleting a role also removes it from everyone it was assigned to. <code style={mono}>Operations</code> + <code style={mono}>Moderator</code> are built in and carry powers.</p>
       </div>
 
       {/* 2 ─ Assign a role (dropdown of created + built-in roles) */}
@@ -817,7 +817,7 @@ function ContributorApplications() {
           Applications from <Link to={ROUTES.contribute} style={{ color: "var(--color-primary-hover)" }}>Become a contributor</Link>{" "}
           are <strong>on-chain (Base) but encrypted</strong>. Enable decryption to derive your key (and
           publish it so new applicants encrypt to you), then read the ones you're a recipient of —
-          requires the <code style={mono}>operations</code> role.
+          requires the <code style={mono}>Operations</code> role.
         </p>
       </div>
       <div>
