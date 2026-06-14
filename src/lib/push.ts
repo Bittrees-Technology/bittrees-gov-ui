@@ -188,6 +188,12 @@ export const ROOM_ADMINS: string[] = [
   "0xE5350D96FC3161BF5c385843ec5ee24E8B465B2f",
 ];
 
+// Push's API validates that groupImage is a NON-EMPTY string (a data URI) — it
+// rejects null/empty. We don't surface group avatars in-app, so a minimal valid
+// 1×1 PNG satisfies the requirement.
+const GROUP_IMAGE =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
 /** Admin one-time: create a tiered/Safe-gated group; returns its chatId to configure. */
 export async function createGatedGroup(push: PushClient, room: PushRoom, creator?: string): Promise<string> {
   const gate = {
@@ -201,6 +207,7 @@ export async function createGatedGroup(push: PushClient, room: PushRoom, creator
   const admins = ROOM_ADMINS.filter((a) => a.toLowerCase() !== (creator ?? "").toLowerCase());
   const g = await push.chat.group.create(`Bittrees ${room.name}`, {
     description: room.blurb,
+    image: GROUP_IMAGE,
     members: [],
     admins,
     private: true,
