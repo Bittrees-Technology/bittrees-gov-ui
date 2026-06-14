@@ -201,8 +201,9 @@ function useRoomAccess(rooms: PushRoom[], address?: string) {
           try {
             // Check the gate on THIS deployment (same-origin). gateUrl() bakes in an
             // absolute URL for Push's backend CustomEndpoint, which may point at a
-            // domain not yet serving this build — so use just its path here.
-            const path = new URL(gateUrl(room), window.location.origin).pathname.replace("{{user_address}}", address!);
+            // domain not yet serving this build — so use just its path here. Substitute
+            // the address BEFORE new URL() (it percent-encodes the `{{…}}` braces).
+            const path = new URL(gateUrl(room).replace("{{user_address}}", address!), window.location.origin).pathname;
             const r = await fetch(path);
             out[room.key] = r.status === 200; // granted only on an explicit 200
           } catch {
