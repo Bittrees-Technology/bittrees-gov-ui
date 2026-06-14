@@ -43,10 +43,25 @@ async function readRoles() {
   }
 }
 
-/** Whether `user` (any case) has a role whose label matches `role` (case-insensitive). */
+// Tier roles cascade downward: a higher tier satisfies a lower room's requirement
+// (Partner ⊇ Junior Partner ⊇ Associate). All other roles match exactly.
+const TIER_RANK = { partner: 3, "junior partner": 2, associate: 1 };
+
+/**
+ * Whether `user` satisfies a room's required `role`. Case-insensitive. For the
+ * tier roles, a holder of an equal-or-higher tier passes (so a Partner can enter
+ * the Junior Partner & Associate rooms, a Junior Partner the Associate room, etc.).
+ */
 function hasAssignedRole(roles, user, role) {
   const list = (roles && roles[String(user).toLowerCase()]) || [];
   const want = String(role || "").trim().toLowerCase();
+  const wantRank = TIER_RANK[want];
+  if (wantRank) {
+    return list.some((r) => {
+      const rank = TIER_RANK[String(r?.label || "").trim().toLowerCase()];
+      return rank ? rank >= wantRank : false;
+    });
+  }
   return list.some((r) => String(r?.label || "").trim().toLowerCase() === want);
 }
 
