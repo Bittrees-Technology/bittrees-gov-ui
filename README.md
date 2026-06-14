@@ -50,7 +50,8 @@ See **[DEPLOY.md](./DEPLOY.md)** for the full step-by-step (Vercel import, env v
 Upstash Redis, domain, and the post-deploy admin steps). In brief:
 
 - Vercel project pointed at `gov.bittrees.org`. `vercel.json` rewrites all non-`/api`
-  routes to the SPA; the gating function lives at `api/gate/[...path].js`.
+  routes to the SPA; the gating function is `api/gate.js`, with `/api/gate/*` routed to it
+  via a `vercel.json` rewrite (Vite + Vercel functions don't support Next-style `[...catch-all]`).
 - **Forum/contributor** auto-register their EAS schema on Base on the first post — no
   manual step.
 - **Push rooms**: deploy `/api/gate`, then an admin creates each gated group once

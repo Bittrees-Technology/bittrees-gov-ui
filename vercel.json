@@ -3,5 +3,8 @@
   "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "rewrites": [{ "source": "/((?!api/).*)", "destination": "/" }]
+  "rewrites": [
+    { "source": "/api/gate/(.*)", "destination": "/api/gate?p=$1" },
+    { "source": "/((?!api/).*)", "destination": "/" }
+  ]
 }

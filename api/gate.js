@@ -152,8 +152,18 @@ export default async function handler(req, res) {
   res.setHeader("access-control-allow-origin", "*");
   res.setHeader("cache-control", "no-store");
   try {
-    const parts = (req.url || "").split("?")[0].split("/").filter(Boolean);
-    const gi = parts.indexOf("gate");
+    // Path segments after /api/gate/. vercel.json rewrites /api/gate/(.*) →
+    // /api/gate?p=$1, so read them from the query param (fall back to the raw URL).
+    const p = req.query ? req.query.p : undefined;
+    let parts;
+    if (p != null && p !== "") {
+      parts = String(Array.isArray(p) ? p.join("/") : p).split("/").filter(Boolean);
+    } else {
+      const raw = (req.url || "").split("?")[0].split("/").filter(Boolean);
+      const i = raw.indexOf("gate");
+      parts = i >= 0 ? raw.slice(i + 1) : raw;
+    }
+    const gi = -1; // `parts` already starts at the segment after "gate"
 
     // ENS-subname Safe room: /api/gate/safe/<safeAddress>/<userAddress>/checkAccess
     if (parts[gi + 1] === "safe") {
