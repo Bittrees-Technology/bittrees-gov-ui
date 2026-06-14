@@ -19,8 +19,13 @@ import { normalize } from "viem/ens";
  */
 
 const SNAPSHOT_SPACE = "gov.bittrees.eth";
-const RPC = process.env.MAINNET_RPC_URL || process.env.VITE_MAINNET_RPC_URL || "https://ethereum-rpc.publicnode.com";
-const SAFE_TX_SERVICE = "https://safe-transaction-mainnet.safe.global";
+// Server-side RPC. Do NOT fall back to VITE_MAINNET_RPC_URL — that's the browser
+// key and is usually domain-allowlisted, so it 403s from a serverless function
+// (which has no browser origin), breaking Safe-owner / token / ENS reads. Set
+// MAINNET_RPC_URL (no domain restriction) for a dedicated node; else a public one.
+const RPC = process.env.MAINNET_RPC_URL || "https://ethereum-rpc.publicnode.com";
+// Safe Transaction Service moved to the unified, redirecting api.safe.global host.
+const SAFE_TX_SERVICE = "https://api.safe.global/tx-service/eth";
 
 // Role gating reads the same admin-assigned roles registry as /api/community.
 const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
