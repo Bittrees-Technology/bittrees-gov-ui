@@ -156,6 +156,33 @@ export function useVotingPowerNow(voter: string | undefined) {
   });
 }
 
+/** BGOV voting power for many addresses at once (Snapshot vp per voter, cached). */
+export function useVotingPowers(voters: string[]) {
+  const sorted = [...voters.map((v) => v.toLowerCase())].sort();
+  return useQuery({
+    queryKey: ["snapshot-vps", sorted],
+    enabled: sorted.length > 0,
+    staleTime: 5 * 60_000,
+    queryFn: async () => {
+      const out: Record<string, number> = {};
+      await Promise.all(
+        sorted.map(async (v) => {
+          try {
+            const d = await gql<{ vp: { vp: number } | null }>(
+              `query($voter:String!,$space:String!){ vp(voter:$voter, space:$space){ vp } }`,
+              { voter: v, space: SNAPSHOT_SPACE }
+            );
+            out[v] = d.vp?.vp ?? 0;
+          } catch {
+            out[v] = 0;
+          }
+        })
+      );
+      return out;
+    },
+  });
+}
+
 // ── Cast a vote (Snapshot EIP-712 envelope, all proposal types) ──────────
 /**
  * A vote `choice`, shaped per the proposal's voting type:

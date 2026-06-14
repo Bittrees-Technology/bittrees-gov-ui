@@ -271,6 +271,43 @@ export function useXmtp() {
     [refreshConversations, openConversation]
   );
 
+  /** Send the same message to many addresses at once (no conversation is opened). */
+  const broadcast = useCallback(
+    async (addresses: string[], text: string): Promise<{ sent: number; skipped: number }> => {
+      const client = clientRef.current;
+      const body = text.trim();
+      if (!client || !body) return { sent: 0, skipped: 0 };
+      const { IdentifierKind } = await import("@xmtp/browser-sdk");
+      let sent = 0;
+      let skipped = 0;
+      for (const a of addresses) {
+        let target: string;
+        try {
+          target = getAddress(a.trim()).toLowerCase();
+        } catch {
+          skipped++;
+          continue;
+        }
+        try {
+          const identifier = { identifier: target, identifierKind: IdentifierKind.Ethereum };
+          const reachable = await client.canMessage([identifier]);
+          const ok = reachable instanceof Map ? reachable.get(target) : Array.isArray(reachable) ? reachable[0] : reachable;
+          if (!ok) { skipped++; continue; }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const dm = await (client.conversations as any).newDmWithIdentifier(identifier);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (dm as any).send(body);
+          sent++;
+        } catch {
+          skipped++;
+        }
+      }
+      await refreshConversations();
+      return { sent, skipped };
+    },
+    [refreshConversations]
+  );
+
   // Tear down the stream on unmount.
   useEffect(() => {
     return () => {
@@ -293,5 +330,6 @@ export function useXmtp() {
     openConversation,
     sendMessage,
     startDm,
+    broadcast,
   };
 }

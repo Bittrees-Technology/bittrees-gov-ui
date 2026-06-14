@@ -121,7 +121,7 @@ function DirectMessages() {
   }
   return (
     <div className="dm-layout">
-      <PeoplePanel onMessage={(addr) => { void xmtp.startDm(addr); }} />
+      <PeoplePanel onMessage={(addr) => { void xmtp.startDm(addr); }} onBroadcast={(addrs, text) => xmtp.broadcast(addrs, text)} />
       <Chat xmtp={xmtp} />
     </div>
   );
@@ -259,11 +259,11 @@ function CommunityGroups() {
   const [openRoom, setOpenRoom] = useState<PushRoom | null>(null);
   const [messages, setMessages] = useState<PushMessage[]>([]);
   const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busyKey, setBusyKey] = useState<string>(); // which room is mid-join (per-room, not global)
 
   async function open(room: PushRoom) {
     if (!room.chatId || !push.client || !address) return;
-    setBusy(true);
+    setBusyKey(room.key);
     setError(undefined);
     try {
       await joinRoom(push.client, room.chatId);
@@ -273,7 +273,7 @@ function CommunityGroups() {
     } catch (e) {
       setError(humanError(e));
     } finally {
-      setBusy(false);
+      setBusyKey(undefined);
     }
   }
 
@@ -355,7 +355,7 @@ function CommunityGroups() {
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
           <p className="text-label">Shareholder rooms</p>
           {visBgov.map((room) => (
-            <RoomCard key={room.key} room={room} live={!!room.chatId} eligible busy={busy} onOpen={open} notEligible={null} />
+            <RoomCard key={room.key} room={room} live={!!room.chatId} eligible busy={busyKey === room.key} onOpen={open} notEligible={null} />
           ))}
         </div>
       )}
@@ -365,7 +365,7 @@ function CommunityGroups() {
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
           <p className="text-label">Entity rooms — Safe signers &amp; proposers</p>
           {visSafe.map((room) => (
-            <RoomCard key={room.key} room={room} live={!!room.chatId} eligible busy={busy} onOpen={open} notEligible={null} />
+            <RoomCard key={room.key} room={room} live={!!room.chatId} eligible busy={busyKey === room.key} onOpen={open} notEligible={null} />
           ))}
         </div>
       )}
@@ -375,7 +375,7 @@ function CommunityGroups() {
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
           <p className="text-label">More rooms</p>
           {visCustom.map((room) => (
-            <RoomCard key={room.key} room={room} live={!!room.chatId} eligible busy={busy} onOpen={open} notEligible={null} />
+            <RoomCard key={room.key} room={room} live={!!room.chatId} eligible busy={busyKey === room.key} onOpen={open} notEligible={null} />
           ))}
         </div>
       )}
