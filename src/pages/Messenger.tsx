@@ -24,6 +24,12 @@ import { usePush } from "../lib/usePush";
 import { useRoomRegistry } from "../lib/rooms";
 import { useCanProposeRoom } from "../lib/adminAccess";
 import { ProposeRoom } from "../components/ProposeRoom";
+import { AddressName } from "../components/AddressName";
+import { PeoplePanel } from "../components/PeoplePanel";
+import { getEnsAddress } from "@wagmi/core";
+import { mainnet } from "viem/chains";
+import { normalize } from "viem/ens";
+import { wagmiConfig } from "../lib/chains";
 import { UserBadges } from "../components/badges";
 import { FlagButton, HiddenNotice } from "../components/moderation";
 import { useItemModeration } from "../lib/community";
@@ -113,7 +119,12 @@ function DirectMessages() {
       </div>
     );
   }
-  return <Chat xmtp={xmtp} />;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      <PeoplePanel onMessage={(addr) => { void xmtp.startDm(addr); }} />
+      <Chat xmtp={xmtp} />
+    </div>
+  );
 }
 
 function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
@@ -121,7 +132,15 @@ function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
   const [draft, setDraft] = useState("");
 
   async function start() {
-    const ok = await xmtp.startDm(dmInput);
+    let target = dmInput.trim();
+    if (target.includes(".")) {
+      // Resolve an ENS name to its address before starting the DM.
+      try {
+        const resolved = await getEnsAddress(wagmiConfig, { name: normalize(target), chainId: mainnet.id });
+        if (resolved) target = resolved;
+      } catch { /* fall through — startDm will report an invalid address */ }
+    }
+    const ok = await xmtp.startDm(target);
     if (ok) setDmInput("");
   }
   async function send() {
@@ -135,7 +154,7 @@ function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
       <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 280px) 1fr", minHeight: "440px" }} className="msg-grid">
         <aside style={{ borderRight: "1px solid var(--color-border)", display: "flex", flexDirection: "column" }}>
           <div style={{ padding: "0.85rem", borderBottom: "1px solid var(--color-border)", display: "flex", gap: "0.4rem" }}>
-            <input value={dmInput} onChange={(e) => setDmInput(e.target.value)} placeholder="New message — 0x address" onKeyDown={(e) => e.key === "Enter" && start()} style={{ ...inputStyle, flex: 1 }} />
+            <input value={dmInput} onChange={(e) => setDmInput(e.target.value)} placeholder="New message — 0x address or name.eth" onKeyDown={(e) => e.key === "Enter" && start()} style={{ ...inputStyle, flex: 1 }} />
             <button className="btn-primary" onClick={start} style={{ padding: "0.4rem 0.7rem", fontSize: "0.8rem" }}>Start</button>
           </div>
           <div style={{ overflowY: "auto", flex: 1 }}>
@@ -455,8 +474,10 @@ function ManageMembers({ push, chatId, me }: { push: PushClient; chatId: string;
             <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", maxHeight: "160px", overflowY: "auto" }}>
               {members.map((m) => (
                 <div key={m.wallet} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem", color: "var(--color-ink-muted)" }}>
-                    {m.wallet.slice(0, 6)}…{m.wallet.slice(-4)} {m.role === "ADMIN" && <strong style={{ color: "var(--color-primary-hover)" }}>· admin</strong>}
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem", fontSize: "0.72rem", color: "var(--color-ink-muted)" }}>
+                    <AddressName address={m.wallet} />
+                    <UserBadges address={m.wallet} />
+                    {m.role === "ADMIN" && <strong style={{ color: "var(--color-primary-hover)" }}>· admin</strong>}
                   </span>
                   {m.wallet !== me.toLowerCase() && (
                     <button onClick={() => remove(m.wallet)} disabled={busy} style={{ ...linkBtn, fontSize: "0.72rem", color: "#9a2a2a" }}>remove</button>
@@ -478,8 +499,8 @@ function RoomMessage({ m, myAddress }: { m: PushMessage; myAddress?: string }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: m.mine ? "flex-end" : "flex-start", gap: "0.15rem" }}>
       {!m.mine && (
-        <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", fontFamily: "var(--font-mono)", fontSize: "0.62rem", color: "var(--color-ink-dim)" }}>
-          {m.from.slice(0, 6)}…{m.from.slice(-4)}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", fontSize: "0.62rem", color: "var(--color-ink-dim)" }}>
+          <AddressName address={m.from} />
           <UserBadges address={m.from} />
         </span>
       )}
