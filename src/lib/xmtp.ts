@@ -258,7 +258,7 @@ export function useXmtp() {
           return false;
         }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const dm = await (client.conversations as any).newDmWithIdentifier(identifier);
+        const dm = await (client.conversations as any).createDmWithIdentifier(identifier);
         await refreshConversations();
         await openConversation((dm as unknown as { id: string }).id);
         setError(undefined);
@@ -294,7 +294,7 @@ export function useXmtp() {
           const ok = reachable instanceof Map ? reachable.get(target) : Array.isArray(reachable) ? reachable[0] : reachable;
           if (!ok) { skipped++; continue; }
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const dm = await (client.conversations as any).newDmWithIdentifier(identifier);
+          const dm = await (client.conversations as any).createDmWithIdentifier(identifier);
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           await (dm as any).send(body);
           sent++;
