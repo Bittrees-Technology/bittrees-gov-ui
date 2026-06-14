@@ -67,6 +67,7 @@ export function useRoleDefs(): { data: RoleDef[] | undefined } {
 export function selectableRoles(defs: RoleDef[] | undefined): RoleDef[] {
   const byLabel = new Map<string, RoleDef>();
   for (const k of KNOWN_ROLES) byLabel.set(k.label.toLowerCase(), { label: k.label, color: k.color, description: k.grants, locked: true });
+  for (const t of TIER_ROLES) byLabel.set(t.label.toLowerCase(), { label: t.label, color: t.color, description: `Tier role — its room also admits ≥${t.min} BGOV.`, locked: true });
   for (const d of defs ?? []) {
     const key = String(d.label || "").toLowerCase();
     if (!key) continue;
@@ -151,19 +152,26 @@ export async function moderateItem(opts: { walletClient: WalletClient; account: 
 // ── BGOV tiers (automatic, from voting power) ──────────────────────────────
 export type Tier = "Partner" | "Junior Partner" | "Associate" | "Shareholder" | null;
 
-/** Automatic tiers, by BGOV holdings (the legacy Bittrees thresholds). */
-export const TIER_THRESHOLDS: { label: string; min: number }[] = [
-  { label: "Partner", min: 420 },
-  { label: "Junior Partner", min: 210 },
-  { label: "Associate", min: 69 },
-  { label: "Shareholder", min: 1 },
-];
-
-/** The holder's tier from their BGOV voting power. */
+/**
+ * The ONE automatic tier — any wallet holding ≥1 BGOV is a Shareholder (badge +
+ * Shareholders-room access), no assignment needed. Associate / Junior Partner /
+ * Partner are now manually-assigned roles (see [[TIER_ROLES]]), NOT auto-derived
+ * from BGOV holdings.
+ */
 export function tierFor(vp: number): Tier {
-  for (const t of TIER_THRESHOLDS) if (vp >= t.min) return t.label as Tier;
-  return null;
+  return vp >= 1 ? "Shareholder" : null;
 }
+
+/**
+ * Manually-assigned tier roles — built-in (non-deletable), assigned per user in
+ * Admin → Roles & tags. `min` is the BGOV threshold the matching room ALSO admits:
+ * the Associates / Junior Partners / Partners rooms open to the role OR ≥min BGOV.
+ */
+export const TIER_ROLES: { label: string; min: number; color: string }[] = [
+  { label: "Partner", min: 420, color: "#B8860B" },
+  { label: "Junior Partner", min: 210, color: "#7C6F9B" },
+  { label: "Associate", min: 69, color: "#2F8F5B" },
+];
 
 /**
  * Custom roles that carry built-in powers (assign the exact label in Admin →

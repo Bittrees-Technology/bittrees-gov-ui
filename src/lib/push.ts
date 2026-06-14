@@ -25,7 +25,8 @@ export type RoomRule =
   | { kind: "bgov"; tier: number } // minimum BGOV voting power
   | { kind: "safe"; safe: Address; ens?: string } // Safe signers + proposers
   | { kind: "token"; standard: "erc20" | "erc721"; token: Address; min: string } // min balance / NFT count
-  | { kind: "ens"; name?: string }; // a specific ENS name's address, or (no name) any ENS name
+  | { kind: "ens"; name?: string } // a specific ENS name's address, or (no name) any ENS name
+  | { kind: "role"; role: string }; // holders of an admin-assigned role
 
 /** How a room decides who may join — one rule, or several combined (any/all). */
 export type RoomGate = RoomRule | { kind: "multi"; combine: "any" | "all"; rules: RoomRule[] };
@@ -45,6 +46,7 @@ export function ruleLabel(rule: RoomRule): string {
   if (rule.kind === "bgov") return `≥${rule.tier} BGOV`;
   if (rule.kind === "safe") return `${rule.ens || "Safe"} signers & proposers`;
   if (rule.kind === "ens") return rule.name ? rule.name : "any ENS name";
+  if (rule.kind === "role") return `${rule.role} role`;
   return rule.standard === "erc721" ? `≥${rule.min} NFT of ${rule.token.slice(0, 6)}…` : `holds ${rule.token.slice(0, 6)}…`;
 }
 
@@ -62,12 +64,17 @@ function encodeGate(gate: object): string {
   return btoa(JSON.stringify(gate)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-/** BGOV-tier rooms — the shareholder tiers. */
+/**
+ * BGOV-tier rooms. Shareholders is automatic (≥1 BGOV). The upper three admit a
+ * wallet that EITHER holds ≥the threshold BGOV OR has been assigned the matching
+ * role (Associate / Junior Partner / Partner) — so holders unlock automatically
+ * and admins can hand-grant access to specific non-holders.
+ */
 export const BGOV_ROOMS: PushRoom[] = [
   { key: "shareholders", name: "Shareholders", blurb: "≥1 BGOV", gate: { kind: "bgov", tier: 1 }, envKey: "VITE_PUSH_ROOM_SHAREHOLDERS", chatId: import.meta.env.VITE_PUSH_ROOM_SHAREHOLDERS as string | undefined },
-  { key: "associates", name: "Associates", blurb: "≥69 BGOV", gate: { kind: "bgov", tier: 69 }, envKey: "VITE_PUSH_ROOM_ASSOCIATES", chatId: import.meta.env.VITE_PUSH_ROOM_ASSOCIATES as string | undefined },
-  { key: "junior-partners", name: "Junior Partners", blurb: "≥210 BGOV", gate: { kind: "bgov", tier: 210 }, envKey: "VITE_PUSH_ROOM_JUNIOR", chatId: import.meta.env.VITE_PUSH_ROOM_JUNIOR as string | undefined },
-  { key: "partners", name: "Partners", blurb: "≥420 BGOV", gate: { kind: "bgov", tier: 420 }, envKey: "VITE_PUSH_ROOM_PARTNERS", chatId: import.meta.env.VITE_PUSH_ROOM_PARTNERS as string | undefined },
+  { key: "associates", name: "Associates", blurb: "≥69 BGOV or Associate role", gate: { kind: "multi", combine: "any", rules: [{ kind: "bgov", tier: 69 }, { kind: "role", role: "Associate" }] }, envKey: "VITE_PUSH_ROOM_ASSOCIATES", chatId: import.meta.env.VITE_PUSH_ROOM_ASSOCIATES as string | undefined },
+  { key: "junior-partners", name: "Junior Partners", blurb: "≥210 BGOV or Junior Partner role", gate: { kind: "multi", combine: "any", rules: [{ kind: "bgov", tier: 210 }, { kind: "role", role: "Junior Partner" }] }, envKey: "VITE_PUSH_ROOM_JUNIOR", chatId: import.meta.env.VITE_PUSH_ROOM_JUNIOR as string | undefined },
+  { key: "partners", name: "Partners", blurb: "≥420 BGOV or Partner role", gate: { kind: "multi", combine: "any", rules: [{ kind: "bgov", tier: 420 }, { kind: "role", role: "Partner" }] }, envKey: "VITE_PUSH_ROOM_PARTNERS", chatId: import.meta.env.VITE_PUSH_ROOM_PARTNERS as string | undefined },
 ];
 
 // chatId + env-var name for each Safe-gated subname room. Literal env reads (Vite
@@ -107,7 +114,8 @@ export function gateUrl(room: PushRoom): string {
   const g = room.gate;
   // Multiple rules (or a single ENS rule) ride along in the URL, base64-encoded.
   if (g.kind === "multi") return `${GATE_BASE_URL}/multi/${encodeGate(g)}/${USER}/checkAccess`;
-  if (g.kind === "ens") return `${GATE_BASE_URL}/multi/${encodeGate({ kind: "multi", combine: "any", rules: [g] })}/${USER}/checkAccess`;
+  // ENS + role need the registry/resolver, so they ride in the base64 multi gate.
+  if (g.kind === "ens" || g.kind === "role") return `${GATE_BASE_URL}/multi/${encodeGate({ kind: "multi", combine: "any", rules: [g] })}/${USER}/checkAccess`;
   if (g.kind === "safe") return `${GATE_BASE_URL}/safe/${g.safe}/${USER}/checkAccess`;
   if (g.kind === "token") return `${GATE_BASE_URL}/token/${g.standard}/${g.token}/${g.min}/${USER}/checkAccess`;
   return `${GATE_BASE_URL}/${g.tier}/${USER}/checkAccess`;

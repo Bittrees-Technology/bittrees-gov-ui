@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Link } from "react-router";
+import { useQuery } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useXmtp } from "../lib/xmtp";
@@ -13,6 +13,7 @@ import {
   roomMembers,
   setRoomRole,
   removeFromRoom,
+  gateUrl,
   type PushRoom,
   type PushMessage,
   type PushClient,
@@ -20,12 +21,11 @@ import {
   type RoomRole,
 } from "../lib/push";
 import { usePush } from "../lib/usePush";
-import { useSafeAccess } from "../lib/safe";
 import { useRoomRegistry } from "../lib/rooms";
 import { UserBadges } from "../components/badges";
 import { FlagButton, HiddenNotice } from "../components/moderation";
 import { useItemModeration } from "../lib/community";
-import { fmtNumber, ROUTES } from "../lib/links";
+import { fmtNumber } from "../lib/links";
 
 function humanError(e: unknown): string {
   const a = e as { shortMessage?: string; message?: string };
@@ -178,6 +178,36 @@ function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
   );
 }
 
+/**
+ * Which rooms the connected wallet may access — asks the same `/api/gate` endpoint
+ * Push uses to enforce joins (substituting the address for the `{{user_address}}`
+ * template). 200 → accessible, 403 → not. Fails OPEN on a network/endpoint error
+ * (the join itself is still gated server-side, so a stray show never leaks content).
+ * We hide every room whose check is explicitly `false`.
+ */
+function useRoomAccess(rooms: PushRoom[], address?: string) {
+  const keys = rooms.map((r) => r.key).join(",");
+  return useQuery({
+    queryKey: ["room-access", address, keys],
+    enabled: !!address && rooms.length > 0,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const out: Record<string, boolean> = {};
+      await Promise.all(
+        rooms.map(async (room) => {
+          try {
+            const r = await fetch(gateUrl(room).replace("{{user_address}}", address!));
+            out[room.key] = r.status === 403 ? false : true;
+          } catch {
+            out[room.key] = true; // fail-open — join stays gated regardless
+          }
+        })
+      );
+      return out;
+    },
+  });
+}
+
 /* ── Community rooms (Push, token-gated) ────────────────────────────────── */
 function CommunityGroups() {
   const { address } = useAccount();
@@ -190,6 +220,11 @@ function CommunityGroups() {
   const customRooms = registry?.custom ?? [];
   const bgovRooms = BGOV_ROOMS.map((r) => ({ ...r, chatId: chatIds?.[r.key] ?? r.chatId }));
   const safeRooms = SAFE_ROOMS.map((r) => ({ ...r, chatId: chatIds?.[r.key] ?? r.chatId }));
+
+  // Hide rooms the connected wallet can't access (checked against the gate endpoint).
+  const allRooms: PushRoom[] = [...bgovRooms, ...safeRooms, ...customRooms];
+  const { data: roomAccess, isLoading: accessLoading } = useRoomAccess(allRooms, address);
+  const canSee = (r: PushRoom) => roomAccess?.[r.key] !== false;
 
   const push = usePush(); // shared, signature-persistent (survives tab switch + reload)
   const [error, setError] = useState<string>();
@@ -268,45 +303,50 @@ function CommunityGroups() {
     );
   }
 
+  const visBgov = bgovRooms.filter(canSee);
+  const visSafe = safeRooms.filter(canSee);
+  const visCustom = customRooms.filter(canSee);
+  const nothing = visBgov.length + visSafe.length + visCustom.length === 0;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-      {/* Shareholder (BGOV-tier) rooms */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-        <p style={dim}>Your BGOV: <strong style={{ color: "var(--color-ink)" }}>{fmtNumber(bgov)}</strong> · rooms you qualify for unlock automatically.</p>
-        {bgovRooms.map((room) => {
-          const tier = room.gate.kind === "bgov" ? room.gate.tier : 0;
-          return (
-            <RoomCard
-              key={room.key}
-              room={room}
-              live={!!room.chatId}
-              eligible={bgov >= tier}
-              busy={busy}
-              onOpen={open}
-              notEligible={
-                <>
-                  Need ≥{fmtNumber(tier)} BGOV ·{" "}
-                  <Link to={ROUTES.mint} style={{ color: "var(--color-primary-hover)" }}>mint</Link>
-                </>
-              }
-            />
-          );
-        })}
-      </div>
+      <p style={dim}>
+        Your BGOV: <strong style={{ color: "var(--color-ink)" }}>{fmtNumber(bgov)}</strong> · only rooms this wallet can access are shown.
+      </p>
 
-      {/* Entity rooms — one per bittrees.eth subname, gated to its Safe */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-        <p className="text-label">Entity rooms — Safe signers &amp; proposers</p>
-        {safeRooms.map((room) => (
-          <SafeRoomRow key={room.key} room={room} busy={busy} onOpen={open} />
-        ))}
-      </div>
+      {accessLoading && <p style={dim}>Checking which rooms you can access…</p>}
+      {!accessLoading && nothing && (
+        <p style={dim}>
+          No rooms available to this wallet yet — rooms appear here once you qualify, by your
+          BGOV holdings or a role assigned to you.
+        </p>
+      )}
 
-      {/* Custom rooms (admin-created, custom gates) */}
-      {customRooms.length > 0 && (
+      {/* Shareholder (BGOV-tier) rooms the wallet can access */}
+      {visBgov.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          <p className="text-label">Shareholder rooms</p>
+          {visBgov.map((room) => (
+            <RoomCard key={room.key} room={room} live={!!room.chatId} eligible busy={busy} onOpen={open} notEligible={null} />
+          ))}
+        </div>
+      )}
+
+      {/* Entity (Safe-gated) rooms the wallet can access */}
+      {visSafe.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          <p className="text-label">Entity rooms — Safe signers &amp; proposers</p>
+          {visSafe.map((room) => (
+            <RoomCard key={room.key} room={room} live={!!room.chatId} eligible busy={busy} onOpen={open} notEligible={null} />
+          ))}
+        </div>
+      )}
+
+      {/* Custom rooms (admin-created) the wallet can access */}
+      {visCustom.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
           <p className="text-label">More rooms</p>
-          {customRooms.map((room) => (
+          {visCustom.map((room) => (
             <RoomCard key={room.key} room={room} live={!!room.chatId} eligible busy={busy} onOpen={open} notEligible={null} />
           ))}
         </div>
@@ -350,25 +390,6 @@ function RoomCard({ room, live, eligible, busy, onOpen, notEligible, roleLabel }
         <span style={{ ...dim, fontSize: "0.78rem", textAlign: "right" }}>{notEligible}</span>
       )}
     </div>
-  );
-}
-
-/** A Safe-gated room row — eligibility is the wallet's signer/proposer status. */
-function SafeRoomRow({ room, busy, onOpen }: { room: PushRoom; busy: boolean; onOpen: (r: PushRoom) => void }) {
-  const { address } = useAccount();
-  const safe = room.gate.kind === "safe" ? room.gate.safe : undefined;
-  const { data: access, isLoading } = useSafeAccess(safe, address);
-  const eligible = !!access?.eligible;
-  return (
-    <RoomCard
-      room={room}
-      live={!!room.chatId}
-      eligible={eligible}
-      busy={busy}
-      onOpen={onOpen}
-      roleLabel={eligible ? access?.role ?? undefined : undefined}
-      notEligible={isLoading ? "Checking…" : "Signers & proposers only"}
-    />
   );
 }
 

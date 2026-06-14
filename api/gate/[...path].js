@@ -22,6 +22,34 @@ const SNAPSHOT_SPACE = "gov.bittrees.eth";
 const RPC = process.env.MAINNET_RPC_URL || process.env.VITE_MAINNET_RPC_URL || "https://ethereum-rpc.publicnode.com";
 const SAFE_TX_SERVICE = "https://safe-transaction-mainnet.safe.global";
 
+// Role gating reads the same admin-assigned roles registry as /api/community.
+const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+const ROLES_KEY = "bittrees:roles"; // { <addrLower>: [{ label, color }] }
+
+/** The admin-assigned roles map from KV ({} if KV isn't configured). */
+async function readRoles() {
+  if (!KV_URL || !KV_TOKEN) return {};
+  try {
+    const r = await fetch(KV_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${KV_TOKEN}`, "content-type": "application/json" },
+      body: JSON.stringify(["GET", ROLES_KEY]),
+    });
+    const j = await r.json();
+    return j?.result ? JSON.parse(j.result) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Whether `user` (any case) has a role whose label matches `role` (case-insensitive). */
+function hasAssignedRole(roles, user, role) {
+  const list = (roles && roles[String(user).toLowerCase()]) || [];
+  const want = String(role || "").trim().toLowerCase();
+  return list.some((r) => String(r?.label || "").trim().toLowerCase() === want);
+}
+
 const SAFE_ABI = [
   { name: "getOwners", type: "function", stateMutability: "view", inputs: [], outputs: [{ type: "address[]" }] },
 ];
@@ -89,10 +117,11 @@ async function ensResolve(name) {
   }
 }
 
-/** Evaluate a single access rule for `user` (checksummed). */
-async function evalRule(rule, user) {
+/** Evaluate a single access rule for `user` (checksummed). `roles` = the registry map. */
+async function evalRule(rule, user, roles) {
   const u = user.toLowerCase();
   try {
+    if (rule.kind === "role") return hasAssignedRole(roles || {}, u, rule.role);
     if (rule.kind === "bgov") return (await bgovVotingPower(u)) >= Number(rule.tier || 0);
     if (rule.kind === "safe") {
       if (!isAddr(rule.safe)) return false;
@@ -152,7 +181,9 @@ export default async function handler(req, res) {
       const rules = Array.isArray(gate?.rules) ? gate.rules : [];
       const combine = gate?.combine === "all" ? "all" : "any";
       if (rules.length === 0) { res.status(403).json({ access: false }); return; }
-      const results = await Promise.all(rules.map((r) => evalRule(r, user)));
+      // Load the roles registry once if any rule is role-gated.
+      const roles = rules.some((r) => r?.kind === "role") ? await readRoles() : {};
+      const results = await Promise.all(rules.map((r) => evalRule(r, user, roles)));
       const ok = combine === "all" ? results.every(Boolean) : results.some(Boolean);
       res.status(ok ? 200 : 403).json({ access: ok, combine, rules: rules.length });
       return;

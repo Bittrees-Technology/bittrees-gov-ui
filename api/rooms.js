@@ -61,6 +61,7 @@ function validRule(r) {
   if (r.kind === "safe") return isAddr(r.safe);
   if (r.kind === "token") return (r.standard === "erc20" || r.standard === "erc721") && isAddr(r.token) && /^\d+$/.test(String(r.min || ""));
   if (r.kind === "ens") return r.name === undefined || r.name === "" || (typeof r.name === "string" && /\./.test(r.name) && r.name.length <= 80);
+  if (r.kind === "role") return typeof r.role === "string" && r.role.trim().length > 0 && r.role.length <= 64;
   return false;
 }
 function validGate(g) {

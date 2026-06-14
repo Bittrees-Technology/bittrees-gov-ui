@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useIsAdmin, fetchSpaceSettings, updateSpaceSettings } from "../lib/snapshot";
 import { BGOV_ROOMS, SAFE_ROOMS, ROOM_ADMINS, initPush, createGatedGroup, gateUrl, gateLabel, type PushRoom, type PushClient, type RoomGate, type RoomRule } from "../lib/push";
 import { useRoomRegistry, saveRoomChatId, saveCustomRoom, deleteCustomRoom } from "../lib/rooms";
-import { assignRole, unassignRole, createRole, deleteRole, selectableRoles, useCommunity, moderateItem, publishEncKey, TIER_THRESHOLDS } from "../lib/community";
+import { assignRole, unassignRole, createRole, deleteRole, selectableRoles, useCommunity, moderateItem, publishEncKey, TIER_ROLES } from "../lib/community";
 import { useTopics, CONTRIB_COMMUNITY, EASSCAN_VIEW } from "../lib/forum";
 import { deriveEncKeypair, decryptApplication, pubKeyHex, type Application, type Envelope, type EncKeypair } from "../lib/appcrypto";
 import { ROUTES, shortAddress, relativeTime } from "../lib/links";
@@ -311,11 +311,12 @@ function CommunityRoomsAdmin({ address }: { address: `0x${string}` }) {
 }
 
 /* ── Custom rooms — admin-defined, with custom gatekeeping ────────────────── */
-type RuleType = "erc20" | "erc721" | "safe" | "ens" | "bgov";
-interface RuleDraft { type: RuleType; tier: string; safe: string; token: string; min: string; decimals: string; ens: string }
-const emptyRule = (): RuleDraft => ({ type: "erc20", tier: "69", safe: "", token: "", min: "1", decimals: "18", ens: "" });
+type RuleType = "erc20" | "erc721" | "safe" | "ens" | "bgov" | "role";
+interface RuleDraft { type: RuleType; tier: string; safe: string; token: string; min: string; decimals: string; ens: string; role: string }
+const emptyRule = (): RuleDraft => ({ type: "erc20", tier: "69", safe: "", token: "", min: "1", decimals: "18", ens: "", role: "" });
 function toRule(d: RuleDraft): RoomRule | null {
   try {
+    if (d.type === "role") return d.role.trim() ? { kind: "role", role: d.role.trim() } : null;
     if (d.type === "bgov") return { kind: "bgov", tier: Math.max(0, Number(d.tier) || 0) };
     if (d.type === "safe") return isAddress(d.safe.trim()) ? { kind: "safe", safe: getAddress(d.safe.trim()) } : null;
     if (d.type === "ens") {
@@ -333,8 +334,10 @@ function toRule(d: RuleDraft): RoomRule | null {
 function CustomRoomManager({ push, address }: { push: PushClient; address: `0x${string}` }) {
   const { data: walletClient } = useWalletClient();
   const { data: registry } = useRoomRegistry();
+  const { data: community } = useCommunity();
   const qc = useQueryClient();
   const custom = registry?.custom ?? [];
+  const roleOptions = selectableRoles(community?.roledefs);
 
   const [name, setName] = useState("");
   const [combine, setCombine] = useState<"any" | "all">("any");
@@ -410,12 +413,19 @@ function CustomRoomManager({ push, address }: { push: PushClient; address: `0x${
         {rules.map((r, i) => (
           <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
             <select value={r.type} onChange={(e) => setRule(i, { type: e.target.value as RuleType })} style={{ ...inputStyle, width: "auto" }}>
-              <option value="erc20">Token (ERC-20)</option>
-              <option value="erc721">NFT (ERC-721)</option>
+              <option value="role">Role</option>
+              <option value="bgov">BGOV</option>
               <option value="safe">Safe signers</option>
               <option value="ens">ENS name</option>
-              <option value="bgov">BGOV</option>
+              <option value="erc20">Token (ERC-20)</option>
+              <option value="erc721">NFT (ERC-721)</option>
             </select>
+            {r.type === "role" && (
+              <select value={r.role} onChange={(e) => setRule(i, { role: e.target.value })} style={{ ...inputStyle, width: "auto", minWidth: "160px" }}>
+                <option value="">Select a role…</option>
+                {roleOptions.map((o) => <option key={o.label} value={o.label}>{o.label}</option>)}
+              </select>
+            )}
             {r.type === "bgov" && (
               <input value={r.tier} onChange={(e) => setRule(i, { tier: e.target.value })} type="number" min={0} placeholder="Min BGOV" style={{ ...inputStyle, width: "110px" }} />
             )}
@@ -564,7 +574,7 @@ function RolesAdmin({ address }: { address: `0x${string}` }) {
         <p style={{ ...dim, margin: "0.25rem 0 0", lineHeight: 1.55 }}>
           First <strong>create a role</strong> (a reusable label + colour), then <strong>assign</strong> it to an
           address — it shows as a badge next to their posts in the forum and messages in chat, alongside the
-          automatic BGOV tier (Partner / Junior Partner / Associate / Shareholder). Needs the registry (Vercel KV) connected.
+          one automatic tier (Shareholder, ≥1 BGOV). Needs the registry (Vercel KV) connected.
         </p>
       </div>
 
@@ -614,13 +624,17 @@ function RolesAdmin({ address }: { address: `0x${string}` }) {
         {error && <p role="alert" style={{ ...dim, color: "var(--color-ink)", margin: 0 }}>{error}</p>}
       </div>
 
-      {/* 3 ─ Reference: automatic BGOV tiers */}
+      {/* 3 ─ Reference: the one automatic tier + the manual tier roles */}
       <div className="card" style={{ background: "var(--color-bg-subtle)", display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-        <p className="text-label" style={{ margin: 0 }}>Automatic tiers</p>
+        <p className="text-label" style={{ margin: 0 }}>Tiers</p>
         <p style={{ ...dim, margin: 0, lineHeight: 1.55 }}>
-          Shown automatically by BGOV held — no assignment needed:{" "}
-          {TIER_THRESHOLDS.map((t, i) => (
-            <span key={t.label}>{i > 0 ? " · " : ""}{t.label} ≥{t.min}</span>
+          <strong>Shareholder</strong> (≥1 BGOV) is automatic — no assignment needed.
+        </p>
+        <p style={{ ...dim, margin: 0, lineHeight: 1.55 }}>
+          <strong>{TIER_ROLES.map((t) => t.label).join(", ")}</strong> are assigned per user (above).
+          Their rooms also admit anyone holding{" "}
+          {TIER_ROLES.map((t, i) => (
+            <span key={t.label}>{i > 0 ? " / " : ""}≥{t.min} BGOV ({t.label})</span>
           ))}.
         </p>
       </div>
