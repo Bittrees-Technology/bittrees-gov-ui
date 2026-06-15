@@ -19,6 +19,7 @@ import {
   SAFE_ROOMS,
   joinRoom,
   roomHistory,
+  roomHistoryOlder,
   sendRoom,
   roomMembers,
   setRoomRole,
@@ -433,6 +434,9 @@ function CommunityGroups() {
   const [messages, setMessages] = useState<PushMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [busyKey, setBusyKey] = useState<string>(); // which room is mid-join (per-room, not global)
+  // Cursor for "Load older messages" (Push paginates 30 at a time); undefined = no more.
+  const [olderCursor, setOlderCursor] = useState<string>();
+  const [loadingOlder, setLoadingOlder] = useState(false);
 
   async function open(room: PushRoom) {
     if (!room.chatId || !push.client || !address) return;
@@ -440,13 +444,33 @@ function CommunityGroups() {
     setError(undefined);
     try {
       await joinRoom(push.client, room.chatId);
-      const msgs = await roomHistory(push.client, room.chatId, address);
+      const page = await roomHistory(push.client, room.chatId, address);
       setOpenRoom(room);
-      setMessages(msgs);
+      setMessages(page.messages);
+      setOlderCursor(page.cursor);
     } catch (e) {
       setError(humanError(e));
     } finally {
       setBusyKey(undefined);
+    }
+  }
+
+  async function loadOlder() {
+    if (!openRoom?.chatId || !push.client || !address || !olderCursor || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const page = await roomHistoryOlder(push.client, openRoom.chatId, olderCursor, address);
+      setMessages((cur) => {
+        const seen = new Set(cur.map((m) => m.id));
+        const older = page.messages.filter((m) => !seen.has(m.id));
+        return [...older, ...cur]; // prepend older history above the current view
+      });
+      // Stop if there's no further cursor or it didn't advance (avoids a dead loop).
+      setOlderCursor(page.cursor && page.cursor !== olderCursor ? page.cursor : undefined);
+    } catch (e) {
+      setError(humanError(e));
+    } finally {
+      setLoadingOlder(false);
     }
   }
 
@@ -484,7 +508,7 @@ function CommunityGroups() {
     return (
       <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: "440px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem 0.95rem", borderBottom: "1px solid var(--color-border)" }}>
-          <button onClick={() => { setOpenRoom(null); setMessages([]); }} style={{ ...linkBtn }}>← Rooms</button>
+          <button onClick={() => { setOpenRoom(null); setMessages([]); setOlderCursor(undefined); }} style={{ ...linkBtn }}>← Rooms</button>
           <span style={{ fontFamily: "var(--font-serif)", fontWeight: 700, color: "var(--color-ink)" }}>Bittrees {openRoom.name}</span>
           <span style={{ ...dim, fontSize: "0.72rem" }}>{openRoom.blurb}</span>
         </div>
@@ -492,6 +516,15 @@ function CommunityGroups() {
           <ManageMembers push={push.client} chatId={openRoom.chatId} me={address} />
         )}
         <div style={{ flex: 1, overflowY: "auto", padding: "1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+          {olderCursor && (
+            <button
+              onClick={loadOlder}
+              disabled={loadingOlder}
+              style={{ ...linkBtn, alignSelf: "center", fontSize: "0.74rem", padding: "0.25rem 0.5rem", color: "var(--color-primary-hover)" }}
+            >
+              {loadingOlder ? "Loading…" : "↑ Load older messages"}
+            </button>
+          )}
           {messages.length === 0 ? (
             <p style={{ ...dim, margin: "auto" }}>No messages yet — say gm.</p>
           ) : (

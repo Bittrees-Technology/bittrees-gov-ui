@@ -184,11 +184,35 @@ export async function joinRoom(push: PushClient, chatId: string) {
   return push.chat.group.join(chatId);
 }
 
-export async function roomHistory(push: PushClient, chatId: string, myAddr: string): Promise<PushMessage[]> {
-  // Push caps history `limit` at 30 (a higher value 500s with "Limit must be less
-  // than equal to 30"), which is what broke opening a room.
-  const raw = await push.chat.history(chatId, { limit: 30 });
-  return normalize(raw, myAddr).reverse(); // history is newest-first → oldest→newest
+/** A page of room history (oldest→newest) + a cursor to fetch the NEXT older page
+ *  ("Load older messages"), undefined when there's no more history. */
+export interface RoomHistoryPage { messages: PushMessage[]; cursor?: string }
+
+const ROOM_PAGE = 30; // Push caps `limit` at 30 — paginate with `reference` for more.
+
+function roomPage(raw: any[], myAddr: string): RoomHistoryPage {
+  const arr = Array.isArray(raw) ? raw : [];
+  // Push returns newest-first, so the LAST item is the oldest in this page. If we got
+  // a full page there's likely more; its link/cid is the cursor for the next batch.
+  const oldest = arr[arr.length - 1];
+  const cursor = arr.length >= ROOM_PAGE ? (oldest?.link || oldest?.cid || undefined) : undefined;
+  return { messages: normalize(arr, myAddr).reverse(), cursor };
+}
+
+export async function roomHistory(push: PushClient, chatId: string, myAddr: string): Promise<RoomHistoryPage> {
+  const raw = await push.chat.history(chatId, { limit: ROOM_PAGE });
+  return roomPage(raw, myAddr);
+}
+
+/** Fetch the next OLDER page, starting from a cursor returned by a prior call. */
+export async function roomHistoryOlder(
+  push: PushClient,
+  chatId: string,
+  before: string,
+  myAddr: string
+): Promise<RoomHistoryPage> {
+  const raw = await push.chat.history(chatId, { reference: before, limit: ROOM_PAGE });
+  return roomPage(raw, myAddr);
 }
 
 export async function sendRoom(push: PushClient, chatId: string, content: string) {

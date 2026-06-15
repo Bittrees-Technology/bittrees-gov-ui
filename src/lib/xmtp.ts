@@ -186,7 +186,9 @@ export function useXmtp() {
       setMessages([]);
       try {
         await conv.sync();
-        const msgs = await conv.messages({ limit: 100n });
+        // High limit = effectively the FULL 1:1 history (XMTP messages are stored
+        // locally after sync, so reading them all is cheap — no network per message).
+        const msgs = await conv.messages({ limit: 100000n });
         // messages() returns newest-first — reverse to render oldest→newest, dropping
         // system/non-text messages (null) so they don't render as unsupported bubbles.
         setMessages([...msgs].reverse().map(toChatMessage).filter((m): m is ChatMessage => m !== null));
