@@ -215,6 +215,7 @@ const FOOTER_COLS: { title: string; links: FooterLinkDef[] }[] = [
     title: "Organization",
     links: [
       { label: "Structure", href: ROUTES.structure },
+      { label: "Revenue & Token Flow", href: "/69420" },
       { label: "Vision statement", href: ROUTES.vision },
       { label: "Code of conduct", href: ROUTES.codeOfConduct },
       { label: "Metaverse HQ", href: ROUTES.metaverse },
