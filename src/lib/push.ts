@@ -185,7 +185,9 @@ export async function joinRoom(push: PushClient, chatId: string) {
 }
 
 export async function roomHistory(push: PushClient, chatId: string, myAddr: string): Promise<PushMessage[]> {
-  const raw = await push.chat.history(chatId, { limit: 40 });
+  // Push caps history `limit` at 30 (a higher value 500s with "Limit must be less
+  // than equal to 30"), which is what broke opening a room.
+  const raw = await push.chat.history(chatId, { limit: 30 });
   return normalize(raw, myAddr).reverse(); // history is newest-first → oldest→newest
 }
 
