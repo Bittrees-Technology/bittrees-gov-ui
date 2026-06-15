@@ -17,6 +17,7 @@ import Messenger from "./pages/Messenger";
 import Vision from "./pages/Vision";
 import CodeOfConduct from "./pages/CodeOfConduct";
 import Metaverse from "./pages/Metaverse";
+import TokenFlow from "./pages/TokenFlow";
 import { ConfigBanner } from "./components/ConfigBanner";
 import { FAMILY, GOV_LINKS, ROUTES } from "./lib/links";
 
@@ -54,6 +55,7 @@ export default function App() {
             <Route path={ROUTES.vision} element={<Vision />} />
             <Route path={ROUTES.codeOfConduct} element={<CodeOfConduct />} />
             <Route path={ROUTES.metaverse} element={<Metaverse />} />
+            <Route path="/69420" element={<TokenFlow />} />
           </Routes>
         </main>
         <Footer />
