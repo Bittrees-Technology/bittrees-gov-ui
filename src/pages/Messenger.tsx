@@ -59,11 +59,6 @@ export default function Messenger() {
       <header style={{ borderBottom: "1px solid var(--color-border)", paddingBottom: "1.5rem" }}>
         <p className="text-label">Bittrees, Inc.</p>
         <h1 className="text-display">Messenger</h1>
-        <p style={{ fontFamily: "var(--font-sans)", fontSize: "0.9375rem", color: "var(--color-ink-muted)", maxWidth: "660px", lineHeight: 1.6, marginTop: "0.5rem" }}>
-          Wallet-native messaging — no phone number, no account.<br />
-          Encrypted 1:1 <strong>direct messages</strong> over XMTP,<br />
-          plus token-gated <strong>community rooms</strong>
-        </p>
       </header>
 
       <div style={{ display: "flex", gap: "0.25rem", borderBottom: "1px solid var(--color-border)" }}>
