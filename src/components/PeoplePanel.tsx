@@ -33,7 +33,7 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
   const blocked = useBlocked();
   const { data: community } = useCommunity();
   const roles = community?.roles ?? {};
-  const contacts = useContacts();
+  const contacts = useContacts(address);
   const roleOptions = selectableRoles(community?.roledefs);
 
   const [roleFilter, setRoleFilter] = useState(""); // "" = Contacts
@@ -85,7 +85,7 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
         addr = resolved;
       }
       if (!isAddress(addr)) throw new Error("Enter a valid 0x address or ENS name.");
-      addContact(getAddress(addr));
+      addContact(address, getAddress(addr));
       setAddInput("");
     } catch (e) {
       setErr(humanError(e));
@@ -135,7 +135,7 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
           <p style={{ ...dim, margin: 0 }}>{roleFilter === "" ? "No saved contacts yet — add one above." : "No one found for that role."}</p>
         ) : (
           shown.map((addr) => (
-            <PersonRow key={addr} address={addr} onMessage={onMessage} saved={isContact(addr)} onToggleContact={() => (isContact(addr) ? removeContact(addr) : addContact(getAddress(addr)))} onBlock={() => blockAddr(addr)} />
+            <PersonRow key={addr} address={addr} onMessage={onMessage} saved={isContact(address, addr)} onToggleContact={() => (isContact(address, addr) ? removeContact(address, addr) : addContact(address, getAddress(addr)))} onBlock={() => blockAddr(addr)} />
           ))
         )}
       </div>
