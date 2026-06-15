@@ -1,8 +1,18 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useXmtp } from "../lib/xmtp";
+import { useXmtp, type ConvSummary } from "../lib/xmtp";
+import {
+  useDmPrefs,
+  useBlocked,
+  togglePin,
+  setArchived,
+  markRead,
+  setPinnedOrder,
+  blockAddr,
+  unblockAddr,
+} from "../lib/dmPrefs";
 import { useVotingPowerNow } from "../lib/snapshot";
 import {
   BGOV_ROOMS,
@@ -130,6 +140,53 @@ function DirectMessages() {
 function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
   const [dmInput, setDmInput] = useState("");
   const [draft, setDraft] = useState("");
+  const [menuId, setMenuId] = useState<string>();
+  const [showArchived, setShowArchived] = useState(false);
+  const [showBlocked, setShowBlocked] = useState(false);
+  const prefs = useDmPrefs();
+  const blocked = useBlocked();
+
+  // Keep the open conversation marked read as it's viewed / new messages arrive.
+  useEffect(() => {
+    if (xmtp.activeId) markRead(xmtp.activeId, Date.now());
+  }, [xmtp.activeId, xmtp.messages.length]);
+
+  // Partition: pinned (manual order) → recent (newest first) → archived → blocked.
+  // DMs whose peer is blocked are dropped from the visible list entirely.
+  const { pinned, recent, archived } = useMemo(() => {
+    const blk = new Set(blocked);
+    const visible = xmtp.conversations.filter(
+      (c) => !(c.kind === "dm" && c.peerAddress && blk.has(c.peerAddress.toLowerCase()))
+    );
+    const arch = visible.filter((c) => prefs[c.id]?.archived);
+    const live = visible.filter((c) => !prefs[c.id]?.archived);
+    const pin = live
+      .filter((c) => prefs[c.id]?.pinned)
+      .sort((a, b) => (prefs[a.id]?.order ?? 0) - (prefs[b.id]?.order ?? 0));
+    const rec = live
+      .filter((c) => !prefs[c.id]?.pinned)
+      .sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0));
+    return { pinned: pin, recent: rec, archived: arch };
+  }, [xmtp.conversations, prefs, blocked]);
+
+  function move(id: string, dir: "up" | "down") {
+    const ids = pinned.map((c) => c.id);
+    const i = ids.indexOf(id);
+    const j = dir === "up" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    setPinnedOrder(ids);
+  }
+  async function blockConv(c: ConvSummary) {
+    if (!c.peerAddress) return;
+    setMenuId(undefined);
+    blockAddr(c.peerAddress);
+    await xmtp.setPeerConsent(c.peerAddress, false);
+  }
+  async function unblock(addr: string) {
+    unblockAddr(addr);
+    await xmtp.setPeerConsent(addr, true);
+  }
 
   async function start() {
     let target = dmInput.trim();
@@ -149,6 +206,23 @@ function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
     await xmtp.sendMessage(t);
   }
 
+  const isUnread = (c: ConvSummary) =>
+    !!c.lastAt && !c.lastFromMe && c.id !== xmtp.activeId && c.lastAt > (prefs[c.id]?.lastReadAt ?? 0);
+
+  const rowProps = (c: ConvSummary) => ({
+    c,
+    active: c.id === xmtp.activeId,
+    unread: isUnread(c),
+    pinned: !!prefs[c.id]?.pinned,
+    menuOpen: menuId === c.id,
+    onOpen: () => { setMenuId(undefined); xmtp.openConversation(c.id); },
+    onMenu: () => setMenuId((m) => (m === c.id ? undefined : c.id)),
+    onPin: () => togglePin(c.id),
+    onArchive: () => { setArchived(c.id, true); setMenuId(undefined); },
+    onUnarchive: () => setArchived(c.id, false),
+    onBlock: () => blockConv(c),
+  });
+
   return (
     <div className="card" style={{ padding: 0, overflow: "hidden" }}>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 280px) 1fr", minHeight: "440px" }} className="msg-grid">
@@ -161,15 +235,42 @@ function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
             {xmtp.conversations.length === 0 ? (
               <p style={{ ...dim, padding: "1rem" }}>No conversations yet. Start one with an address above.</p>
             ) : (
-              xmtp.conversations.map((c) => {
-                const active = c.id === xmtp.activeId;
-                return (
-                  <button key={c.id} onClick={() => xmtp.openConversation(c.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "0.7rem 0.85rem", border: "none", borderBottom: "1px solid var(--color-border-light)", background: active ? "var(--color-bg-subtle)" : "transparent", cursor: "pointer", fontFamily: "var(--font-sans)" }}>
-                    <span style={{ fontSize: "0.85rem", fontWeight: active ? 700 : 500, color: "var(--color-ink)" }}>{c.title}</span>
-                    <span style={{ display: "block", fontSize: "0.68rem", color: "var(--color-ink-dim)", textTransform: "uppercase", letterSpacing: "0.05em", marginTop: "0.1rem" }}>{c.kind}</span>
-                  </button>
-                );
-              })
+              <>
+                {pinned.length > 0 && (
+                  <>
+                    <ListHeader>Pinned</ListHeader>
+                    {pinned.map((c, i) => (
+                      <ConvRow key={c.id} {...rowProps(c)} canUp={i > 0} canDown={i < pinned.length - 1} onUp={() => move(c.id, "up")} onDown={() => move(c.id, "down")} />
+                    ))}
+                  </>
+                )}
+                {recent.map((c) => <ConvRow key={c.id} {...rowProps(c)} />)}
+                {pinned.length === 0 && recent.length === 0 && archived.length > 0 && (
+                  <p style={{ ...dim, padding: "1rem" }}>All conversations archived.</p>
+                )}
+
+                {archived.length > 0 && (
+                  <>
+                    <button onClick={() => setShowArchived((v) => !v)} style={discloseStyle}>
+                      {showArchived ? "▾" : "▸"} Archived ({archived.length})
+                    </button>
+                    {showArchived && archived.map((c) => <ConvRow key={c.id} {...rowProps(c)} archived />)}
+                  </>
+                )}
+                {blocked.length > 0 && (
+                  <>
+                    <button onClick={() => setShowBlocked((v) => !v)} style={discloseStyle}>
+                      {showBlocked ? "▾" : "▸"} Blocked ({blocked.length})
+                    </button>
+                    {showBlocked && blocked.map((addr) => (
+                      <div key={addr} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.4rem", padding: "0.5rem 0.85rem", borderBottom: "1px solid var(--color-border-light)" }}>
+                        <span style={{ minWidth: 0, overflow: "hidden" }}><AddressName address={addr} /></span>
+                        <button onClick={() => unblock(addr)} style={{ ...linkBtn, fontSize: "0.72rem", color: "var(--color-primary-hover)", flexShrink: 0 }}>Unblock</button>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </>
             )}
           </div>
         </aside>
@@ -197,6 +298,83 @@ function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
       )}
     </div>
   );
+}
+
+/** One conversation row: peer identity (ENS), recency, unread dot, and an options
+ *  bar (pin/reorder · archive · block) revealed by the ⋯ toggle. */
+function ConvRow({ c, active, unread, pinned, menuOpen, archived, onOpen, onMenu, onPin, onArchive, onUnarchive, onBlock, canUp, canDown, onUp, onDown }: {
+  c: ConvSummary;
+  active: boolean;
+  unread: boolean;
+  pinned: boolean;
+  menuOpen: boolean;
+  archived?: boolean;
+  onOpen: () => void;
+  onMenu: () => void;
+  onPin: () => void;
+  onArchive: () => void;
+  onUnarchive: () => void;
+  onBlock: () => void;
+  canUp?: boolean;
+  canDown?: boolean;
+  onUp?: () => void;
+  onDown?: () => void;
+}) {
+  return (
+    <div style={{ borderBottom: "1px solid var(--color-border-light)", background: active ? "var(--color-bg-subtle)" : "transparent" }}>
+      <div style={{ display: "flex", alignItems: "stretch" }}>
+        <button onClick={onOpen} style={{ flex: 1, minWidth: 0, textAlign: "left", padding: "0.6rem 0.3rem 0.6rem 0.85rem", border: "none", background: "none", cursor: "pointer", fontFamily: "var(--font-sans)" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: "0.4rem", minWidth: 0 }}>
+            {unread && <span aria-label="unread" style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--color-primary)", flexShrink: 0 }} />}
+            <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "0.85rem", fontWeight: unread || active ? 700 : 500, color: "var(--color-ink)" }}>
+              {c.kind === "dm" && c.peerAddress ? <AddressName address={c.peerAddress} /> : c.title}
+            </span>
+            {pinned && <span title="Pinned" aria-hidden style={{ flexShrink: 0, fontSize: "0.66rem", color: "var(--color-ink-dim)" }}>📌</span>}
+            {c.lastAt != null && <span style={{ marginLeft: "auto", flexShrink: 0, fontSize: "0.64rem", color: "var(--color-ink-dim)" }}>{relTime(c.lastAt)}</span>}
+          </span>
+          {c.lastText && (
+            <span style={{ display: "block", marginTop: "0.15rem", fontSize: "0.72rem", color: unread ? "var(--color-ink-muted)" : "var(--color-ink-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {c.lastFromMe ? "You: " : ""}{c.lastText}
+            </span>
+          )}
+        </button>
+        <button onClick={onMenu} aria-label="Conversation options" title="Options" style={{ border: "none", background: "none", cursor: "pointer", padding: "0 0.6rem", color: menuOpen ? "var(--color-ink)" : "var(--color-ink-dim)", fontSize: "1.1rem", lineHeight: 1 }}>⋯</button>
+      </div>
+      {menuOpen && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", padding: "0 0.85rem 0.6rem" }}>
+          {!archived && <RowAction onClick={onPin}>{pinned ? "Unpin" : "Pin"}</RowAction>}
+          {pinned && !archived && <RowAction onClick={onUp} disabled={!canUp}>↑</RowAction>}
+          {pinned && !archived && <RowAction onClick={onDown} disabled={!canDown}>↓</RowAction>}
+          {archived ? <RowAction onClick={onUnarchive}>Unarchive</RowAction> : <RowAction onClick={onArchive}>Archive</RowAction>}
+          {c.kind === "dm" && c.peerAddress && <RowAction onClick={onBlock} danger>Block</RowAction>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RowAction({ onClick, children, danger, disabled }: { onClick?: () => void; children: React.ReactNode; danger?: boolean; disabled?: boolean }) {
+  return (
+    <button onClick={onClick} disabled={disabled} style={{ padding: "0.18rem 0.5rem", fontFamily: "var(--font-sans)", fontSize: "0.72rem", fontWeight: 600, color: disabled ? "var(--color-ink-dim)" : danger ? "#9a2a2a" : "var(--color-ink-muted)", background: "#ffffff", border: "1px solid var(--color-border)", borderRadius: "2px", cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.5 : 1 }}>
+      {children}
+    </button>
+  );
+}
+
+function ListHeader({ children }: { children: React.ReactNode }) {
+  return (
+    <p style={{ margin: 0, padding: "0.5rem 0.85rem 0.2rem", fontFamily: "var(--font-sans)", fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: "var(--color-ink-dim)" }}>{children}</p>
+  );
+}
+
+/** Compact relative timestamp for the conversation list (now / 5m / 3h / 2d / date). */
+function relTime(ms: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (s < 45) return "now";
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  if (s < 604800) return `${Math.floor(s / 86400)}d`;
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 /**
@@ -543,3 +721,4 @@ const inputStyle = {
 };
 const linkBtn = { background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-sans)", fontSize: "0.8rem", color: "var(--color-ink-muted)", padding: 0 } as const;
 const dim = { fontFamily: "var(--font-sans)", fontSize: "0.85rem", color: "var(--color-ink-dim)" } as const;
+const discloseStyle = { display: "block", width: "100%", textAlign: "left" as const, padding: "0.55rem 0.85rem", border: "none", borderTop: "1px solid var(--color-border-light)", background: "var(--color-bg-subtle)", cursor: "pointer", fontFamily: "var(--font-sans)", fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.06em", color: "var(--color-ink-dim)" } as const;

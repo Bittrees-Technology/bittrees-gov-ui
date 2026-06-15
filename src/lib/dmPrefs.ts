@@ -1,0 +1,124 @@
+import { useSyncExternalStore } from "react";
+
+/**
+ * Per-device organization for direct-message conversations — pin, archive, manual
+ * order, and last-read tracking — plus a personal block list. All of it lives in
+ * localStorage (private to this browser; XMTP itself stores nothing of this). Two
+ * tiny external stores so the UI re-renders on change, mirroring contacts.ts.
+ *
+ * Conversation prefs are keyed by the XMTP conversation id. The block list is keyed
+ * by lowercased wallet address (a peer can be blocked before any DM exists).
+ */
+
+export interface DmPref {
+  pinned?: boolean;
+  archived?: boolean;
+  order?: number; // position among pinned (lower = higher); undefined → end
+  lastReadAt?: number; // ms; messages newer than this (and not mine) are unread
+}
+export type DmPrefs = Record<string, DmPref>;
+
+/* ── conversation prefs ─────────────────────────────────────────────────── */
+const PREFS_KEY = "bittrees.dm.prefs";
+const prefsListeners = new Set<() => void>();
+
+function loadPrefs(): DmPrefs {
+  try {
+    const v = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
+    return v && typeof v === "object" ? (v as DmPrefs) : {};
+  } catch {
+    return {};
+  }
+}
+
+let prefsCache: DmPrefs = loadPrefs();
+
+function persistPrefs() {
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefsCache)); } catch { /* ignore */ }
+  prefsListeners.forEach((l) => l());
+}
+
+export function useDmPrefs(): DmPrefs {
+  return useSyncExternalStore(
+    (cb) => { prefsListeners.add(cb); return () => { prefsListeners.delete(cb); }; },
+    () => prefsCache,
+    () => prefsCache
+  );
+}
+
+function patch(id: string, p: Partial<DmPref>) {
+  prefsCache = { ...prefsCache, [id]: { ...prefsCache[id], ...p } };
+  persistPrefs();
+}
+
+export function togglePin(id: string) {
+  const cur = prefsCache[id];
+  if (cur?.pinned) {
+    patch(id, { pinned: false, order: undefined });
+  } else {
+    // new pins go to the end of the pinned list
+    const maxOrder = Math.max(0, ...Object.values(prefsCache).map((p) => p.order ?? 0));
+    patch(id, { pinned: true, order: maxOrder + 1, archived: false });
+  }
+}
+
+export function setArchived(id: string, archived: boolean) {
+  patch(id, archived ? { archived: true, pinned: false, order: undefined } : { archived: false });
+}
+
+export function markRead(id: string, ts: number) {
+  if ((prefsCache[id]?.lastReadAt ?? 0) >= ts) return; // no-op if already current
+  patch(id, { lastReadAt: ts });
+}
+
+/** Rewrite the pinned order from a fully-ordered list of conversation ids. */
+export function setPinnedOrder(orderedIds: string[]) {
+  const next = { ...prefsCache };
+  orderedIds.forEach((id, i) => { next[id] = { ...next[id], pinned: true, order: i + 1 }; });
+  prefsCache = next;
+  persistPrefs();
+}
+
+/* ── block list ─────────────────────────────────────────────────────────── */
+const BLOCK_KEY = "bittrees.dm.blocked";
+const blockListeners = new Set<() => void>();
+
+function loadBlocked(): string[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(BLOCK_KEY) || "[]");
+    return Array.isArray(v) ? v.map((a) => String(a).toLowerCase()) : [];
+  } catch {
+    return [];
+  }
+}
+
+let blockCache: string[] = loadBlocked();
+
+function persistBlocked() {
+  try { localStorage.setItem(BLOCK_KEY, JSON.stringify(blockCache)); } catch { /* ignore */ }
+  blockListeners.forEach((l) => l());
+}
+
+export function useBlocked(): string[] {
+  return useSyncExternalStore(
+    (cb) => { blockListeners.add(cb); return () => { blockListeners.delete(cb); }; },
+    () => blockCache,
+    () => blockCache
+  );
+}
+
+export function isBlocked(address?: string): boolean {
+  if (!address) return false;
+  return blockCache.includes(address.toLowerCase());
+}
+
+export function blockAddr(address: string) {
+  const a = address.toLowerCase();
+  if (!blockCache.includes(a)) { blockCache = [...blockCache, a]; persistBlocked(); }
+}
+
+export function unblockAddr(address: string) {
+  const a = address.toLowerCase();
+  blockCache = blockCache.filter((x) => x !== a);
+  persistBlocked();
+}

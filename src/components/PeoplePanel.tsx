@@ -2,11 +2,13 @@ import { useMemo, useState } from "react";
 import { getAddress, isAddress } from "viem";
 import { normalize } from "viem/ens";
 import { mainnet } from "viem/chains";
+import { useAccount } from "wagmi";
 import { getEnsAddress } from "@wagmi/core";
 import { wagmiConfig } from "../lib/chains";
 import { useCommunity, selectableRoles } from "../lib/community";
 import { useVotingPowers } from "../lib/snapshot";
 import { useContacts, addContact, removeContact, isContact } from "../lib/contacts";
+import { useBlocked, blockAddr } from "../lib/dmPrefs";
 import { AddressName } from "./AddressName";
 import { UserBadges } from "./badges";
 
@@ -26,6 +28,9 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
   onMessage: (address: string) => void;
   onBroadcast: (addresses: string[], text: string) => Promise<{ sent: number; skipped: number }>;
 }) {
+  const { address } = useAccount();
+  const me = address?.toLowerCase();
+  const blocked = useBlocked();
   const { data: community } = useCommunity();
   const roles = community?.roles ?? {};
   const contacts = useContacts();
@@ -41,13 +46,14 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
   const [bcasting, setBcasting] = useState(false);
   const [bcastMsg, setBcastMsg] = useState<string>();
 
-  // Everyone we know about: holders of any assigned role + saved contacts.
+  // Everyone we know about: holders of any assigned role + saved contacts (minus me).
   const universe = useMemo(() => {
     const set = new Set<string>();
     Object.keys(roles).forEach((a) => set.add(a.toLowerCase()));
     contacts.forEach((c) => set.add(c.address.toLowerCase()));
+    if (me) set.delete(me);
     return [...set];
-  }, [roles, contacts]);
+  }, [roles, contacts, me]);
 
   // Shareholder is BGOV-derived (not in the roles registry), so resolve holdings
   // for the known universe only when that filter is active.
@@ -55,12 +61,16 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
   const { data: vps, isLoading: vpLoading } = useVotingPowers(needVp ? universe : []);
 
   const shown: string[] = useMemo(() => {
-    if (roleFilter === "") return contacts.map((c) => c.address);
-    if (roleFilter === SHAREHOLDER) return universe.filter((a) => (vps?.[a] ?? 0) >= 1);
-    return Object.entries(roles)
+    const blk = new Set(blocked);
+    let base: string[];
+    if (roleFilter === "") base = contacts.map((c) => c.address);
+    else if (roleFilter === SHAREHOLDER) base = universe.filter((a) => (vps?.[a] ?? 0) >= 1);
+    else base = Object.entries(roles)
       .filter(([, list]) => (list ?? []).some((r) => r.label.toLowerCase() === roleFilter.toLowerCase()))
       .map(([a]) => a);
-  }, [roleFilter, contacts, universe, vps, roles]);
+    // Never list yourself or anyone you've blocked.
+    return base.filter((a) => a.toLowerCase() !== me && !blk.has(a.toLowerCase()));
+  }, [roleFilter, contacts, universe, vps, roles, me, blocked]);
 
   async function add() {
     const v = addInput.trim();
@@ -125,7 +135,7 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
           <p style={{ ...dim, margin: 0 }}>{roleFilter === "" ? "No saved contacts yet — add one above." : "No one found for that role."}</p>
         ) : (
           shown.map((addr) => (
-            <PersonRow key={addr} address={addr} onMessage={onMessage} saved={isContact(addr)} onToggleContact={() => (isContact(addr) ? removeContact(addr) : addContact(getAddress(addr)))} />
+            <PersonRow key={addr} address={addr} onMessage={onMessage} saved={isContact(addr)} onToggleContact={() => (isContact(addr) ? removeContact(addr) : addContact(getAddress(addr)))} onBlock={() => blockAddr(addr)} />
           ))
         )}
       </div>
@@ -151,7 +161,7 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
   );
 }
 
-function PersonRow({ address, onMessage, saved, onToggleContact }: { address: string; onMessage: (a: string) => void; saved: boolean; onToggleContact: () => void }) {
+function PersonRow({ address, onMessage, saved, onToggleContact, onBlock }: { address: string; onMessage: (a: string) => void; saved: boolean; onToggleContact: () => void; onBlock: () => void }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.6rem", flexWrap: "wrap", padding: "0.35rem 0", borderBottom: "1px solid var(--color-border-light)" }}>
       <span style={{ display: "inline-flex", alignItems: "center", gap: "0.45rem", minWidth: 0, flexWrap: "wrap" }}>
@@ -163,6 +173,7 @@ function PersonRow({ address, onMessage, saved, onToggleContact }: { address: st
         <button onClick={onToggleContact} title={saved ? "Remove contact" : "Save contact"} style={{ ...miniBtn, color: saved ? "#9a2a2a" : "var(--color-ink-muted)" }}>
           {saved ? "★" : "☆"}
         </button>
+        <button onClick={onBlock} title="Block — hide and stop DMs" style={{ ...miniBtn, color: "#9a2a2a" }}>⊘</button>
       </span>
     </div>
   );

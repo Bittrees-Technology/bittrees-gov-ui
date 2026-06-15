@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAccount, useWalletClient } from "wagmi";
 import { toBytes, getAddress } from "viem";
 import type { Client, Conversation, DecodedMessage } from "@xmtp/browser-sdk";
+import { isBlocked } from "./dmPrefs";
 
 /**
  * Wallet-native messaging on XMTP V3 (MLS). The SDK is loaded LAZILY via dynamic
@@ -22,6 +23,10 @@ export interface ConvSummary {
   id: string;
   kind: "dm" | "group";
   title: string;
+  peerAddress?: string; // DM only — the other participant's wallet (UI resolves ENS)
+  lastAt?: number; // ms timestamp of the most recent message (for recency sort)
+  lastText?: string; // short preview of the most recent message
+  lastFromMe?: boolean; // I sent the most recent message (→ never counts as unread)
 }
 
 export interface ChatMessage {
@@ -44,7 +49,42 @@ function textOf(content: unknown): string {
   return typeof content === "string" ? content : "(unsupported message type)";
 }
 
-async function summarize(c: Conversation): Promise<ConvSummary> {
+// A DM exposes only the peer's inboxId, not their wallet — resolving the address
+// means inboxId → inbox state → identifier, a network-ish lookup. Cache the result
+// (memory + localStorage) so the conversation list doesn't re-resolve every refresh.
+const PEER_KEY = "bittrees.xmtp.peers";
+const peerCache: Map<string, string> = (() => {
+  try { return new Map<string, string>(Object.entries(JSON.parse(localStorage.getItem(PEER_KEY) || "{}"))); }
+  catch { return new Map<string, string>(); }
+})();
+function rememberPeer(convId: string, address: string) {
+  peerCache.set(convId, address.toLowerCase());
+  try { localStorage.setItem(PEER_KEY, JSON.stringify(Object.fromEntries(peerCache))); } catch { /* ignore */ }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function resolvePeer(c: Conversation, client: any): Promise<string | undefined> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const inboxId: string | undefined = await (c as any).peerInboxId?.();
+    if (!inboxId) return undefined;
+    let states = await client.preferences.getInboxStates([inboxId]); // local DB first
+    if (!states?.[0]?.accountIdentifiers?.length) {
+      states = await client.preferences.fetchInboxStates([inboxId]); // then the network
+    }
+    const idents = states?.[0]?.accountIdentifiers ?? [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const eth = idents.find((i: any) => /^0x[0-9a-fA-F]{40}$/.test(i?.identifier)) ?? idents[0];
+    const addr = eth?.identifier as string | undefined;
+    if (addr) rememberPeer((c as unknown as { id: string }).id, addr);
+    return addr?.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function summarize(c: Conversation, client: any, myInboxId: string): Promise<ConvSummary> {
   // Group conversations expose a name; DMs don't. Best-effort, guarded.
   const anyC = c as unknown as { id: string; name?: string };
   let title = "Direct message";
@@ -58,7 +98,30 @@ async function summarize(c: Conversation): Promise<ConvSummary> {
   } catch {
     /* default to DM */
   }
-  return { id: anyC.id, kind, title };
+
+  let peerAddress: string | undefined;
+  if (kind === "dm") {
+    peerAddress = peerCache.get(anyC.id) || (await resolvePeer(c, client));
+    if (peerAddress) title = peerAddress; // rendered through <AddressName> (ENS) in the UI
+  }
+
+  let lastAt: number | undefined;
+  let lastText: string | undefined;
+  let lastFromMe: boolean | undefined;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const lm = await (c as any).lastMessage?.();
+    if (lm) {
+      const ns = (lm.sentAtNs ?? null) as bigint | null;
+      lastAt = ns != null ? Number(ns / 1_000_000n) : lm.sentAt ? new Date(lm.sentAt).getTime() : undefined;
+      lastText = textOf(lm.content);
+      lastFromMe = lm.senderInboxId === myInboxId;
+    }
+  } catch {
+    /* no last message yet */
+  }
+
+  return { id: anyC.id, kind, title, peerAddress, lastAt, lastText, lastFromMe };
 }
 
 // One client per address, kept in module scope so it survives tab switches and
@@ -103,7 +166,8 @@ export function useXmtp() {
     await client.conversations.syncAll();
     const list = await client.conversations.list();
     convRef.current = new Map(list.map((c) => [(c as unknown as { id: string }).id, c]));
-    setConversations(await Promise.all(list.map(summarize)));
+    const myInbox = myInboxRef.current;
+    setConversations(await Promise.all(list.map((c) => summarize(c, client, myInbox))));
   }, []);
 
   const openConversation = useCallback(
@@ -248,6 +312,10 @@ export function useXmtp() {
         setError("Enter a valid 0x address.");
         return false;
       }
+      if (isBlocked(target)) {
+        setError("You've blocked this address. Unblock them to start a conversation.");
+        return false;
+      }
       try {
         const { IdentifierKind } = await import("@xmtp/browser-sdk");
         const identifier = { identifier: target, identifierKind: IdentifierKind.Ethereum };
@@ -259,6 +327,7 @@ export function useXmtp() {
         }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const dm = await (client.conversations as any).createDmWithIdentifier(identifier);
+        rememberPeer((dm as unknown as { id: string }).id, target); // we know the peer — skip resolution
         await refreshConversations();
         await openConversation((dm as unknown as { id: string }).id);
         setError(undefined);
@@ -271,42 +340,92 @@ export function useXmtp() {
     [refreshConversations, openConversation]
   );
 
-  /** Send the same message to many addresses at once (no conversation is opened). */
+  /**
+   * Send the same message to many addresses at once (no conversation is opened).
+   * Reachability is checked in ONE batched canMessage call, then delivery runs in a
+   * small concurrency pool instead of strictly one-at-a-time — that's what kept
+   * "Message all" from feeling laggy. Blocked, invalid, and duplicate addresses are
+   * dropped up front.
+   */
   const broadcast = useCallback(
     async (addresses: string[], text: string): Promise<{ sent: number; skipped: number }> => {
       const client = clientRef.current;
       const body = text.trim();
       if (!client || !body) return { sent: 0, skipped: 0 };
       const { IdentifierKind } = await import("@xmtp/browser-sdk");
-      let sent = 0;
+
+      // Normalize → drop invalid / blocked / duplicate.
+      const targets: string[] = [];
       let skipped = 0;
       for (const a of addresses) {
-        let target: string;
         try {
-          target = getAddress(a.trim()).toLowerCase();
-        } catch {
-          skipped++;
-          continue;
-        }
-        try {
-          const identifier = { identifier: target, identifierKind: IdentifierKind.Ethereum };
-          const reachable = await client.canMessage([identifier]);
-          const ok = reachable instanceof Map ? reachable.get(target) : Array.isArray(reachable) ? reachable[0] : reachable;
-          if (!ok) { skipped++; continue; }
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const dm = await (client.conversations as any).createDmWithIdentifier(identifier);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await (dm as any).send(body);
-          sent++;
+          const t = getAddress(a.trim()).toLowerCase();
+          if (isBlocked(t) || targets.includes(t)) continue;
+          targets.push(t);
         } catch {
           skipped++;
         }
       }
+      if (targets.length === 0) return { sent: 0, skipped };
+
+      // One reachability check for the whole set.
+      const identifiers = targets.map((t) => ({ identifier: t, identifierKind: IdentifierKind.Ethereum }));
+      let reach: Map<string, boolean>;
+      try {
+        const r = await client.canMessage(identifiers);
+        reach = r instanceof Map ? r : new Map();
+      } catch {
+        reach = new Map();
+      }
+      const reachable = targets.filter((t) => reach.get(t));
+      skipped += targets.length - reachable.length;
+
+      // Deliver in a bounded concurrency pool (createDm + send is the slow part).
+      let sent = 0;
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < reachable.length) {
+          const t = reachable[cursor++];
+          try {
+            const identifier = { identifier: t, identifierKind: IdentifierKind.Ethereum };
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const dm = await (client.conversations as any).createDmWithIdentifier(identifier);
+            rememberPeer((dm as unknown as { id: string }).id, t);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (dm as any).send(body);
+            sent++;
+          } catch {
+            skipped++;
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(6, reachable.length) }, worker));
       await refreshConversations();
       return { sent, skipped };
     },
     [refreshConversations]
   );
+
+  /**
+   * Mirror a local block/unblock to XMTP consent for the peer's DM, when one exists.
+   * Best-effort: the visible block (hiding the conversation, refusing new DMs) is
+   * driven by the local block list; this also tells the network so the peer drops
+   * out of allowed conversations on other clients.
+   */
+  const setPeerConsent = useCallback(async (address: string, allowed: boolean) => {
+    const a = address.toLowerCase();
+    let convId: string | undefined;
+    for (const [id, addr] of peerCache) if (addr === a) { convId = id; break; }
+    const conv = convId ? convRef.current.get(convId) : undefined;
+    if (!conv) return;
+    try {
+      const { ConsentState } = await import("@xmtp/browser-sdk");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (conv as any).updateConsentState(allowed ? ConsentState.Allowed : ConsentState.Denied);
+    } catch {
+      /* best effort — local block list is the source of truth for the UI */
+    }
+  }, []);
 
   // Tear down the stream on unmount.
   useEffect(() => {
@@ -331,5 +450,6 @@ export function useXmtp() {
     sendMessage,
     startDm,
     broadcast,
+    setPeerConsent,
   };
 }
