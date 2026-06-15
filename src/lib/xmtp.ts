@@ -45,8 +45,11 @@ function humanError(e: unknown): string {
   return msg;
 }
 
-function textOf(content: unknown): string {
-  return typeof content === "string" ? content : "(unsupported message type)";
+// Decode a message body to text. Returns null for non-text content — MLS
+// membership/system messages, reactions, read receipts, etc. — so callers can SKIP
+// them rather than render "(unsupported message type)" bubbles.
+function textOf(content: unknown): string | null {
+  return typeof content === "string" ? content : null;
 }
 
 // A DM exposes only the peer's inboxId, not their wallet — resolving the address
@@ -114,7 +117,7 @@ async function summarize(c: Conversation, client: any, myInboxId: string): Promi
     if (lm) {
       const ns = (lm.sentAtNs ?? null) as bigint | null;
       lastAt = ns != null ? Number(ns / 1_000_000n) : lm.sentAt ? new Date(lm.sentAt).getTime() : undefined;
-      lastText = textOf(lm.content);
+      lastText = textOf(lm.content) ?? undefined;
       lastFromMe = lm.senderInboxId === myInboxId;
     }
   } catch {
@@ -150,12 +153,16 @@ export function useXmtp() {
   const [activeId, setActiveId] = useState<string>();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
-  const toChatMessage = useCallback((m: DecodedMessage): ChatMessage => {
+  // null = a non-text/system message (e.g. the MLS membership message created with a
+  // DM) — callers filter these out instead of showing "(unsupported message type)".
+  const toChatMessage = useCallback((m: DecodedMessage): ChatMessage | null => {
     const anyM = m as unknown as { id: string; senderInboxId: string; content: unknown };
+    const text = textOf(anyM.content);
+    if (text === null) return null;
     return {
       id: anyM.id,
       senderInboxId: anyM.senderInboxId,
-      text: textOf(anyM.content),
+      text,
       mine: anyM.senderInboxId === myInboxRef.current,
     };
   }, []);
@@ -180,8 +187,9 @@ export function useXmtp() {
       try {
         await conv.sync();
         const msgs = await conv.messages({ limit: 100n });
-        // messages() returns newest-first — reverse to render oldest→newest
-        setMessages([...msgs].reverse().map(toChatMessage));
+        // messages() returns newest-first — reverse to render oldest→newest, dropping
+        // system/non-text messages (null) so they don't render as unsupported bubbles.
+        setMessages([...msgs].reverse().map(toChatMessage).filter((m): m is ChatMessage => m !== null));
       } catch (e) {
         setError(humanError(e));
       }
@@ -198,7 +206,10 @@ export function useXmtp() {
       for await (const msg of stream as AsyncIterable<DecodedMessage>) {
         const anyM = msg as unknown as { conversationId?: string };
         if (anyM.conversationId && anyM.conversationId === activeRef.current) {
-          setMessages((cur) => [...cur, toChatMessage(msg)]);
+          const cm = toChatMessage(msg);
+          // skip system/non-text (null), and de-dupe by id (the stream echoes our own
+          // sends, which we already added optimistically with their real id)
+          if (cm) setMessages((cur) => (cur.some((m) => m.id === cm.id) ? cur : [...cur, cm]));
         } else {
           // a message landed in another conversation — refresh the list lazily
           refreshConversations().catch(() => {});
@@ -288,16 +299,23 @@ export function useXmtp() {
   const sendMessage = useCallback(async (text: string) => {
     const id = activeRef.current;
     const conv = id ? convRef.current.get(id) : undefined;
-    if (!conv || !text.trim()) return;
-    // Conversation.send accepts a string at runtime; the typed overload resolves
-    // to EncodedContent, so cast (dynamic-imported SDK, runtime-correct).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (conv as any).send(text.trim());
-    // optimistic: stream will also deliver it, but show immediately
-    setMessages((cur) => [
-      ...cur,
-      { id: `local-${cur.length}-${text.length}`, senderInboxId: myInboxRef.current, text: text.trim(), mine: true },
-    ]);
+    const body = text.trim();
+    if (!conv || !body) return;
+    try {
+      // sendText is the plain-text path. (Conversation.send expects pre-EncodedContent
+      // — passing a raw string there mis-encodes it, so the peer sees a non-text type.)
+      // It returns the published message id, which lets the stream echo de-dupe below.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msgId: string = await (conv as any).sendText(body);
+      // optimistic: stream also delivers it (de-duped by this id), but show immediately
+      setMessages((cur) =>
+        cur.some((m) => m.id === msgId)
+          ? cur
+          : [...cur, { id: msgId || `local-${cur.length}-${body.length}`, senderInboxId: myInboxRef.current, text: body, mine: true }]
+      );
+    } catch (e) {
+      setError(humanError(e));
+    }
   }, []);
 
   /** Start (or open) a DM with an Ethereum address. Returns false if unreachable. */
@@ -392,7 +410,7 @@ export function useXmtp() {
             const dm = await (client.conversations as any).createDmWithIdentifier(identifier);
             rememberPeer((dm as unknown as { id: string }).id, t);
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (dm as any).send(body);
+            await (dm as any).sendText(body); // plain text (send() expects EncodedContent)
             sent++;
           } catch {
             skipped++;
