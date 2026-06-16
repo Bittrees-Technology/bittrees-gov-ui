@@ -868,10 +868,12 @@ function DmBubble({ m, onReact, onReply, onRetry }: {
       id={`msg-${m.id}`}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => { setHover(false); setPickerOpen(false); }}
-      style={{ display: "flex", flexDirection: "column", alignItems: align, gap: "0.12rem", padding: "0.12rem 0" }}
+      style={{ display: "flex", flexDirection: "column", gap: "0.12rem", padding: "0.12rem 0" }}
     >
       {m.replyTo && <QuotedPreview r={m.replyTo} mine={m.mine} />}
-      <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", flexDirection: m.mine ? "row-reverse" : "row", maxWidth: "92%" }}>
+      {/* Full-width row aligned by flex-direction — NOT a shrink-to-fit row, so the
+          bubble's % max-width resolves against a stable width instead of collapsing. */}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", flexDirection: m.mine ? "row-reverse" : "row" }}>
         <Bubble mine={m.mine} text={m.text} />
         {(hover || pickerOpen) && !pending && (
           <span style={{ display: "inline-flex", gap: "0.15rem", flexShrink: 0, position: "relative" }}>
