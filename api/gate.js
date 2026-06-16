@@ -144,6 +144,24 @@ async function tokenBalance1155(token, user, id) {
   }
 }
 
+const ERC1155_BATCH_ABI = [
+  { name: "balanceOfBatch", type: "function", stateMutability: "view", inputs: [{ type: "address[]" }, { type: "uint256[]" }], outputs: [{ type: "uint256[]" }] },
+];
+const ERC1155_ANY_MAX_ID = 256; // "any token id" scans ids 0..255 in one balanceOfBatch call
+// Total ERC-1155 balance a holder has across ids 0..ERC1155_ANY_MAX_ID-1 — the "any id"
+// check. Covers sequential-id collections (POAP/membership/game items); a holding under
+// a sparse/higher id than the cap isn't seen (use a specific-id rule for those).
+async function tokenBalance1155Any(token, user) {
+  try {
+    const ids = Array.from({ length: ERC1155_ANY_MAX_ID }, (_, i) => BigInt(i));
+    const accounts = ids.map(() => user);
+    const bals = await client.readContract({ address: token, abi: ERC1155_BATCH_ABI, functionName: "balanceOfBatch", args: [accounts, ids] });
+    return (bals || []).reduce((s, b) => s + BigInt(b), 0n);
+  } catch {
+    return 0n;
+  }
+}
+
 const isAddr = (s) => /^0x[a-fA-F0-9]{40}$/.test(s);
 
 /** Decode a base64url gate object from the URL. */
@@ -177,8 +195,11 @@ async function evalRule(rule, user, roles) {
       if (!isAddr(rule.token)) return false;
       const token = getAddress(rule.token);
       if (rule.standard === "erc1155") {
-        let id; try { id = BigInt(rule.tokenId ?? "0"); } catch { id = 0n; }
         let min; try { min = BigInt(rule.min || "1"); } catch { min = 1n; }
+        if (rule.tokenId === undefined || rule.tokenId === "") {
+          return (await tokenBalance1155Any(token, user)) >= min; // any token id
+        }
+        let id; try { id = BigInt(rule.tokenId); } catch { id = 0n; }
         return (await tokenBalance1155(token, user, id)) >= min;
       }
       if (rule.standard === "erc20") {

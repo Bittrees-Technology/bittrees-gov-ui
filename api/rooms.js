@@ -80,7 +80,7 @@ function validRule(r) {
   if (r.kind === "safe") return isAddr(r.safe);
   if (r.kind === "token") {
     if (!isAddr(r.token)) return false;
-    if (r.standard === "erc1155") return /^\d+$/.test(String(r.tokenId ?? "0")) && /^\d+$/.test(String(r.min || ""));
+    if (r.standard === "erc1155") return (r.tokenId === undefined || r.tokenId === "" || /^\d+$/.test(String(r.tokenId))) && /^\d+$/.test(String(r.min || ""));
     if (r.standard === "erc20") return /^\d+(\.\d+)?$/.test(String(r.min || "")); // human amount
     if (r.standard === "erc721") return /^\d+$/.test(String(r.min || ""));
     return false;

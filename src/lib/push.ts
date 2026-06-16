@@ -49,7 +49,7 @@ export function ruleLabel(rule: RoomRule): string {
   if (rule.kind === "safe") return `${rule.ens || "Safe"} signers & proposers`;
   if (rule.kind === "ens") return rule.name ? rule.name : "any ENS name";
   if (rule.kind === "role") return `${rule.role} role`;
-  if (rule.standard === "erc1155") return `≥${rule.min} of ${rule.token.slice(0, 6)}… #${rule.tokenId ?? "0"}`;
+  if (rule.standard === "erc1155") return rule.tokenId !== undefined ? `≥${rule.min} of ${rule.token.slice(0, 6)}… #${rule.tokenId}` : `≥${rule.min} of any ${rule.token.slice(0, 6)}…`;
   return rule.standard === "erc721" ? `≥${rule.min} NFT of ${rule.token.slice(0, 6)}…` : `holds ≥${rule.min} of ${rule.token.slice(0, 6)}…`;
 }
 

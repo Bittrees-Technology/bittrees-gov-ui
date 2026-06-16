@@ -63,7 +63,13 @@ export function RoomGateBuilder({ gate, roleOptions }: { gate: ReturnType<typeof
             <>
               <input value={r.token} onChange={(e) => setRule(i, { token: e.target.value })} placeholder="Token 0x address" style={{ ...inputStyle, flex: 1, minWidth: "160px", fontFamily: "var(--font-mono)", fontSize: "0.8rem" }} />
               {r.type === "erc1155" && (
-                <input value={r.tokenId} onChange={(e) => setRule(i, { tokenId: e.target.value })} title="ERC-1155 token ID — leave blank for #0" placeholder="Token ID (blank = #0)" style={{ ...inputStyle, width: "140px" }} />
+                <label style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", fontSize: "0.8rem", color: "var(--color-ink-dim)", whiteSpace: "nowrap" }} title="On: gate one token ID. Off: admit holders of any token ID in the collection.">
+                  <input type="checkbox" checked={r.specificId} onChange={(e) => setRule(i, { specificId: e.target.checked })} />
+                  specific ID
+                </label>
+              )}
+              {r.type === "erc1155" && r.specificId && (
+                <input value={r.tokenId} onChange={(e) => setRule(i, { tokenId: e.target.value })} placeholder="Token ID" style={{ ...inputStyle, width: "110px" }} />
               )}
               <input value={r.min} onChange={(e) => setRule(i, { min: e.target.value })} placeholder={r.type === "erc20" ? "Min amount" : "Min count"} style={{ ...inputStyle, width: "100px" }} />
             </>
