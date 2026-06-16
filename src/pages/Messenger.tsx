@@ -32,7 +32,6 @@ import {
   roomMembers,
   setRoomRole,
   removeFromRoom,
-  roomLatestTs,
   gateUrl,
   type PushRoom,
   type PushMessage,
@@ -114,33 +113,33 @@ function MessengerHome({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
   const [view, setView] = useState<ShellView>("chat");
   const [openSaved, setOpenSaved] = useState(false);
   const [roomsOpen, setRoomsOpen] = useState(false);
-  const [roomKey, setRoomKey] = useState<string>(); // a specific room, or undefined = browse list
 
+  // Back from ANY full-screen view always returns to the Chat list.
+  const backToChats = () => { xmtp.clearError(); setRoomsOpen(false); setOpenSaved(false); xmtp.closeConversation(); setView("chat"); };
   // Saved Messages = a real DM with your own wallet when XMTP allows it; otherwise a
   // device-local notes store. Try the self-DM first, fall back to local notes.
   const openSavedMessages = async () => { xmtp.clearError(); if (!(await xmtp.startSelfDm())) setOpenSaved(true); };
-  const openRoom = (key: string) => { xmtp.clearError(); setRoomKey(key); setRoomsOpen(true); };
-  const browseRooms = () => { xmtp.clearError(); setRoomKey(undefined); setRoomsOpen(true); };
+  const openRooms = () => { xmtp.clearError(); setRoomsOpen(true); };
 
   // Full-screen views (Telegram-style: the list is replaced, a back arrow returns).
   if (roomsOpen) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-        <button onClick={() => setRoomsOpen(false)} style={{ ...linkBtn, alignSelf: "flex-start", fontSize: "0.85rem", color: "var(--color-primary-hover)", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+        <button onClick={backToChats} style={{ ...linkBtn, alignSelf: "flex-start", fontSize: "0.85rem", color: "var(--color-primary-hover)", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
           <IconBack /> All chats
         </button>
-        <CommunityGroups initialRoomKey={roomKey} />
+        <CommunityGroups />
       </div>
     );
   }
-  if (openSaved) return <SavedChatView owner={address} onBack={() => { xmtp.clearError(); setOpenSaved(false); }} />;
-  if (xmtp.activeId) return <DmChatView xmtp={xmtp} onBack={() => { xmtp.clearError(); xmtp.closeConversation(); }} />;
+  if (openSaved) return <SavedChatView owner={address} onBack={backToChats} />;
+  if (xmtp.activeId) return <DmChatView xmtp={xmtp} onBack={backToChats} />;
 
   return (
     <div className="card msg-shell" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <MessengerToolbar view={view} setView={(v) => { xmtp.clearError(); setView(v); }} />
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-        {view === "chat" && <ChatListView xmtp={xmtp} onOpenSaved={openSavedMessages} onOpenRoom={openRoom} onBrowseRooms={browseRooms} />}
+        {view === "chat" && <ChatListView xmtp={xmtp} onOpenSaved={openSavedMessages} onOpenRooms={openRooms} />}
         {view === "contacts" && <ContactsView onMessage={(addr) => { void xmtp.startDm(addr); }} />}
         {view === "search" && <SearchView xmtp={xmtp} />}
         {view === "settings" && <SettingsView xmtp={xmtp} />}
@@ -181,28 +180,12 @@ function MessengerToolbar({ view, setView }: { view: ShellView; setView: (v: She
 
 /* The conversation list (Telegram-style): Archived (top) · Saved Messages · Requests
    · Pinned · recent DMs · a Community-rooms entry. */
-function ChatListView({ xmtp, onOpenSaved, onOpenRoom, onBrowseRooms }: { xmtp: ReturnType<typeof useXmtp>; onOpenSaved: () => void; onOpenRoom: (key: string) => void; onBrowseRooms: () => void }) {
+function ChatListView({ xmtp, onOpenSaved, onOpenRooms }: { xmtp: ReturnType<typeof useXmtp>; onOpenSaved: () => void; onOpenRooms: () => void }) {
   const prefs = useDmPrefs();
   const blocked = useBlocked();
   const [menuId, setMenuId] = useState<string>();
   const [showArchived, setShowArchived] = useState(false);
   const [showRequests, setShowRequests] = useState(true);
-
-  // Community rooms the wallet can access — pinned to the top, with a per-room unread
-  // flag (the room's latest message vs. when it was last opened).
-  const rooms = useAccessibleRooms();
-  const push = usePush();
-  const roomLatest = useQuery({
-    queryKey: ["rooms-latest", rooms.map((r) => r.key).join(",")],
-    enabled: push.status === "ready" && rooms.length > 0,
-    staleTime: 30_000,
-    queryFn: async () => {
-      const out: Record<string, number> = {};
-      await Promise.all(rooms.map(async (r) => { out[r.key] = r.chatId && push.client ? await roomLatestTs(push.client, r.chatId) : 0; }));
-      return out;
-    },
-  });
-  const roomUnread = (r: PushRoom) => (roomLatest.data?.[r.key] ?? 0) > (prefs[`room:${r.key}`]?.lastReadAt ?? 0);
 
   const { pinned, recent, archived, requests } = useMemo(() => {
     const blk = new Set(blocked);
@@ -254,15 +237,8 @@ function ChatListView({ xmtp, onOpenSaved, onOpenRoom, onBrowseRooms }: { xmtp: 
 
   return (
     <div>
-      {/* Community rooms you can access — pinned above everything (with unread flags) */}
-      {rooms.length > 0 && (
-        <>
-          <ListHeader>Community rooms</ListHeader>
-          {rooms.map((r) => (
-            <RoomListRow key={r.key} room={r} unread={roomUnread(r)} onOpen={() => { markRead(`room:${r.key}`, Date.now()); onOpenRoom(r.key); }} />
-          ))}
-        </>
-      )}
+      {/* Community rooms — a single entry pinned above everything; opens the full list */}
+      <SpecialRow icon="🏛" title="Community rooms" subtitle="Token-gated group chat" onClick={onOpenRooms} />
 
       {/* Archived */}
       {archived.length > 0 && (
@@ -298,44 +274,12 @@ function ChatListView({ xmtp, onOpenSaved, onOpenRoom, onBrowseRooms }: { xmtp: 
       )}
       {recent.map((c) => <ConvRow key={c.id} {...rowProps(c)} />)}
 
-      {/* Browse / join more community rooms */}
-      <SpecialRow icon="🏛" title={rooms.length > 0 ? "Browse all rooms" : "Community rooms"} subtitle="Token-gated group chat" onClick={onBrowseRooms} />
-
-      {noChats && rooms.length === 0 && <p style={{ ...dim, padding: "1rem" }}>No conversations yet — use Search or Contacts to start one.</p>}
+      {noChats && <p style={{ ...dim, padding: "1rem" }}>No conversations yet — use Search or Contacts to start one.</p>}
     </div>
   );
 }
 
-/** Community rooms the connected wallet can access (registry + the same /api/gate
- *  check Push uses), with live chatIds. These are pinned at the top of the chat list. */
-function useAccessibleRooms(): PushRoom[] {
-  const { address } = useAccount();
-  const { data: registry } = useRoomRegistry();
-  const chatIds = registry?.chatIds;
-  const customRooms = registry?.custom ?? [];
-  const bgovRooms = BGOV_ROOMS.map((r) => ({ ...r, chatId: chatIds?.[r.key] ?? r.chatId }));
-  const safeRooms = SAFE_ROOMS.map((r) => ({ ...r, chatId: chatIds?.[r.key] ?? r.chatId }));
-  const allRooms: PushRoom[] = [...bgovRooms, ...safeRooms, ...customRooms];
-  const { data: access } = useRoomAccess(allRooms, address);
-  return allRooms.filter((r) => access?.[r.key] === true && !!r.chatId);
-}
-
-/** A community-room row in the chat list, with an unread dot. */
-function RoomListRow({ room, unread, onOpen }: { room: PushRoom; unread: boolean; onOpen: () => void }) {
-  return (
-    <button onClick={onOpen} style={{ display: "flex", alignItems: "center", gap: "0.6rem", width: "100%", textAlign: "left", padding: "0.55rem 0.85rem", border: "none", borderBottom: "1px solid var(--color-border-light)", background: "none", cursor: "pointer", fontFamily: "var(--font-sans)" }}>
-      <span style={{ width: 32, height: 32, flexShrink: 0, borderRadius: "50%", background: "var(--color-bg-subtle)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "0.95rem" }}>🏛</span>
-      <span style={{ minWidth: 0, flex: 1 }}>
-        <span style={{ display: "block", fontSize: "0.85rem", fontWeight: unread ? 700 : 600, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{room.name}</span>
-        <span style={{ display: "block", fontSize: "0.72rem", color: "var(--color-ink-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{room.blurb}</span>
-      </span>
-      {unread && <span aria-label="unread" style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--color-primary)", flexShrink: 0 }} />}
-      <span style={{ color: "var(--color-ink-dim)", flexShrink: 0 }}>›</span>
-    </button>
-  );
-}
-
-/** A non-DM list entry (Saved Messages, browse rooms) with an icon + chevron. */
+/** A non-DM list entry (Community rooms, Saved Messages) with an icon + chevron. */
 function SpecialRow({ icon, title, subtitle, onClick }: { icon: string; title: string; subtitle: string; onClick: () => void }) {
   return (
     <button onClick={onClick} style={{ display: "flex", alignItems: "center", gap: "0.6rem", width: "100%", textAlign: "left", padding: "0.6rem 0.85rem", border: "none", borderBottom: "1px solid var(--color-border-light)", background: "none", cursor: "pointer", fontFamily: "var(--font-sans)" }}>
@@ -381,6 +325,7 @@ function DmChatView({ xmtp, onBack }: { xmtp: ReturnType<typeof useXmtp>; onBack
         )}
       </div>
       <DmMessageList
+        convId={xmtp.activeId}
         messages={xmtp.messages}
         onReact={(id, inbox, emoji) => void xmtp.toggleReaction(id, inbox, emoji)}
         onReply={setReplyingTo}
@@ -829,23 +774,17 @@ function useRoomAccess(rooms: PushRoom[], address?: string) {
 }
 
 /* ── Community rooms (Push, token-gated) ────────────────────────────────── */
-function CommunityGroups({ initialRoomKey }: { initialRoomKey?: string }) {
+function CommunityGroups() {
   const { address } = useAccount();
   const { data: vpData } = useVotingPowerNow(address);
   const { data: registry } = useRoomRegistry();
   const bgov = vpData ?? 0;
-  const autoOpenedRef = useRef(false);
 
   // Registry (runtime, Vercel KV) chatIds win over env (build-time) fallbacks.
   const chatIds = registry?.chatIds;
   const customRooms = registry?.custom ?? [];
   const bgovRooms = BGOV_ROOMS.map((r) => ({ ...r, chatId: chatIds?.[r.key] ?? r.chatId }));
   const safeRooms = SAFE_ROOMS.map((r) => ({ ...r, chatId: chatIds?.[r.key] ?? r.chatId }));
-
-  // Hide rooms the connected wallet can't access (checked against the gate endpoint).
-  const allRooms: PushRoom[] = [...bgovRooms, ...safeRooms, ...customRooms];
-  const { data: roomAccess, isLoading: accessLoading } = useRoomAccess(allRooms, address);
-  const canSee = (r: PushRoom) => roomAccess?.[r.key] === true; // hidden unless access confirmed
   const canPropose = useCanProposeRoom(address);
 
   const push = usePush(); // shared, signature-persistent (survives tab switch + reload)
@@ -857,6 +796,16 @@ function CommunityGroups({ initialRoomKey }: { initialRoomKey?: string }) {
   // Cursor for "Load older messages" (Push paginates 30 at a time); undefined = no more.
   const [olderCursor, setOlderCursor] = useState<string>();
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const roomEndRef = useRef<HTMLDivElement>(null);
+  const scrollRoomRef = useRef(false); // request a scroll-to-bottom (open / send), not on load-older
+
+  // Scroll the open room to the newest message on open + on send (not when older
+  // history is prepended), so new messages read from the bottom up.
+  useEffect(() => {
+    if (!scrollRoomRef.current) return;
+    scrollRoomRef.current = false;
+    requestAnimationFrame(() => roomEndRef.current?.scrollIntoView({ block: "end" }));
+  }, [messages.length]);
 
   async function open(room: PushRoom) {
     if (!room.chatId || !push.client || !address) return;
@@ -868,21 +817,13 @@ function CommunityGroups({ initialRoomKey }: { initialRoomKey?: string }) {
       setOpenRoom(room);
       setMessages(page.messages);
       setOlderCursor(page.cursor);
-      markRead(`room:${room.key}`, Date.now()); // clears the chat-list unread flag
+      scrollRoomRef.current = true; // jump to newest on open
     } catch (e) {
       setError(humanError(e));
     } finally {
       setBusyKey(undefined);
     }
   }
-
-  // Deep-link: when launched for a specific room (from the chat list), open it once.
-  useEffect(() => {
-    if (autoOpenedRef.current || !initialRoomKey || openRoom || push.status !== "ready") return;
-    const room = allRooms.find((r) => r.key === initialRoomKey);
-    if (room?.chatId) { autoOpenedRef.current = true; void open(room); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialRoomKey, openRoom, push.status, registry]);
 
   async function loadOlder() {
     if (!openRoom?.chatId || !push.client || !address || !olderCursor || loadingOlder) return;
@@ -910,6 +851,7 @@ function CommunityGroups({ initialRoomKey }: { initialRoomKey?: string }) {
     try {
       await sendRoom(push.client, openRoom.chatId, text);
       setMessages((m) => [...m, { id: `local-${m.length}`, from: address.toLowerCase(), text, mine: true }]);
+      scrollRoomRef.current = true; // stick to the bottom after sending
     } catch (e) {
       setError(humanError(e));
     }
@@ -935,16 +877,18 @@ function CommunityGroups({ initialRoomKey }: { initialRoomKey?: string }) {
 
   if (openRoom) {
     return (
-      <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: "440px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.75rem 0.95rem", borderBottom: "1px solid var(--color-border)" }}>
-          <button onClick={() => { setOpenRoom(null); setMessages([]); setOlderCursor(undefined); }} style={{ ...linkBtn }}>← Rooms</button>
-          <span style={{ fontFamily: "var(--font-serif)", fontWeight: 700, color: "var(--color-ink)" }}>Bittrees {openRoom.name}</span>
-          <span style={{ ...dim, fontSize: "0.72rem" }}>{openRoom.blurb}</span>
+      <div className="card msg-shell" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", padding: "0.6rem 0.85rem", borderBottom: "1px solid var(--color-border)", minWidth: 0 }}>
+          <button onClick={() => { setOpenRoom(null); setMessages([]); setOlderCursor(undefined); }} aria-label="Back to rooms" title="Back to rooms" style={{ ...linkBtn, display: "inline-flex", alignItems: "center", color: "var(--color-ink-muted)", flexShrink: 0 }}><IconBack /></button>
+          <span style={{ minWidth: 0, overflow: "hidden" }}>
+            <span style={{ display: "block", fontFamily: "var(--font-sans)", fontWeight: 700, fontSize: "0.9rem", color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Bittrees {openRoom.name}</span>
+            <span style={{ display: "block", ...dim, fontSize: "0.68rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{openRoom.blurb}</span>
+          </span>
         </div>
         {push.client && openRoom.chatId && address && (
           <ManageMembers push={push.client} chatId={openRoom.chatId} me={address} />
         )}
-        <div style={{ flex: 1, overflowY: "auto", padding: "1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           {olderCursor && (
             <button
               onClick={loadOlder}
@@ -959,6 +903,7 @@ function CommunityGroups({ initialRoomKey }: { initialRoomKey?: string }) {
           ) : (
             messages.map((m) => <RoomMessage key={m.id} m={m} myAddress={address} />)
           )}
+          <div ref={roomEndRef} />
         </div>
         <Composer value={draft} setValue={setDraft} onSend={send} />
         {error && <p role="alert" style={{ ...dim, color: "var(--color-ink)", padding: "0 0.95rem 0.75rem", margin: 0 }}>{error}</p>}
@@ -966,50 +911,34 @@ function CommunityGroups({ initialRoomKey }: { initialRoomKey?: string }) {
     );
   }
 
-  const visBgov = bgovRooms.filter(canSee);
-  const visSafe = safeRooms.filter(canSee);
-  const visCustom = customRooms.filter(canSee);
-  const nothing = visBgov.length + visSafe.length + visCustom.length === 0;
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
       <p style={dim}>
-        Your BGOV: <strong style={{ color: "var(--color-ink)" }}>{fmtNumber(bgov)}</strong> · only rooms this wallet can access are shown.
+        Your BGOV: <strong style={{ color: "var(--color-ink)" }}>{fmtNumber(bgov)}</strong> · open any room you qualify for — access is enforced when you join.
       </p>
 
-      {accessLoading && <p style={dim}>Checking which rooms you can access…</p>}
-      {!accessLoading && nothing && (
-        <p style={dim}>
-          No rooms available to this wallet yet — rooms appear here once you qualify, by your
-          BGOV holdings or a role assigned to you.
-        </p>
-      )}
-
-      {/* Shareholder (BGOV-tier) rooms the wallet can access */}
-      {visBgov.length > 0 && (
+      {bgovRooms.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
           <p className="text-label">Shareholder rooms</p>
-          {visBgov.map((room) => (
+          {bgovRooms.map((room) => (
             <RoomCard key={room.key} room={room} live={!!room.chatId} eligible busy={busyKey === room.key} onOpen={open} notEligible={null} />
           ))}
         </div>
       )}
 
-      {/* Entity (Safe-gated) rooms the wallet can access */}
-      {visSafe.length > 0 && (
+      {safeRooms.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
           <p className="text-label">Entity rooms — Safe signers &amp; proposers</p>
-          {visSafe.map((room) => (
+          {safeRooms.map((room) => (
             <RoomCard key={room.key} room={room} live={!!room.chatId} eligible busy={busyKey === room.key} onOpen={open} notEligible={null} />
           ))}
         </div>
       )}
 
-      {/* Custom rooms (admin-created) the wallet can access */}
-      {visCustom.length > 0 && (
+      {customRooms.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
           <p className="text-label">More rooms</p>
-          {visCustom.map((room) => (
+          {customRooms.map((room) => (
             <RoomCard key={room.key} room={room} live={!!room.chatId} eligible busy={busyKey === room.key} onOpen={open} notEligible={null} />
           ))}
         </div>
@@ -1184,7 +1113,8 @@ function DayDivider({ label }: { label: string }) {
   );
 }
 
-function DmMessageList({ messages, onReact, onReply, onRetry, notes, onDelete }: {
+function DmMessageList({ convId, messages, onReact, onReply, onRetry, notes, onDelete }: {
+  convId?: string;
   messages: ChatMessage[];
   onReact: (id: string, inbox: string, emoji: string) => void;
   onReply: (m: ChatMessage) => void;
@@ -1195,16 +1125,26 @@ function DmMessageList({ messages, onReact, onReply, onRetry, notes, onDelete }:
   const containerRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const lastCount = useRef(0);
-  // Stick to the bottom when new messages arrive and the user is already near it.
+  const lastConv = useRef<string | undefined>(undefined);
+  const pendingBottom = useRef(true); // jump to bottom once this conversation's messages render
+  // Anchor on the newest message: jump to the bottom on open / conversation switch (once
+  // its messages have loaded), and keep it pinned when a new message arrives while the
+  // user is already near the bottom. Older history loaded above never yanks the view.
   useEffect(() => {
+    if (convId !== lastConv.current) { lastConv.current = convId; pendingBottom.current = true; lastCount.current = 0; }
     const c = containerRef.current;
+    if (!c) return;
+    if (pendingBottom.current && messages.length > 0) {
+      pendingBottom.current = false;
+      lastCount.current = messages.length;
+      requestAnimationFrame(() => endRef.current?.scrollIntoView({ block: "end" }));
+      return;
+    }
     const grew = messages.length > lastCount.current;
     lastCount.current = messages.length;
-    if (!c) return;
     const nearBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 160;
-    if (grew && nearBottom) endRef.current?.scrollIntoView({ block: "end" });
-  }, [messages.length]);
-  useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, []);
+    if (grew && nearBottom) requestAnimationFrame(() => endRef.current?.scrollIntoView({ block: "end" }));
+  }, [messages.length, convId]);
 
   if (messages.length === 0) {
     return <div style={{ flex: 1, display: "flex", padding: "1rem" }}><p style={{ ...dim, margin: "auto" }}>{notes ? "No notes yet — type below to save one." : "No messages yet — say hello."}</p></div>;
