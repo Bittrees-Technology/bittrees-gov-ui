@@ -61,6 +61,26 @@ function humanError(e: unknown): string {
   return a?.shortMessage || a?.message || "Something went wrong";
 }
 
+/**
+ * Turn a Push (@pushprotocol/restapi) error into something actionable. Push wraps
+ * backend failures in a ValidationError whose `.message` IS the real reason for
+ * well-formed errors (e.g. "groupImage must be a string") — surface that. But a bare
+ * HTTP failure comes through only as axios's "Request failed with status code N" with
+ * no server body; the common one is a 403 when a gated room won't admit an address
+ * that doesn't meet its rule. Spell that out instead of echoing the raw status.
+ */
+function describePushError(e: unknown): string {
+  const x = e as { message?: string; details?: string };
+  const msg = String(x?.message || x?.details || "");
+  const code = msg.match(/status code (\d{3})/i)?.[1];
+  if (code === "403") {
+    return "Push refused this (403 Forbidden) without a detailed reason. Most often it means the room is gated and the address doesn't meet its access rule yet — gated rooms only admit qualifying addresses. For a role room, assign the role first (Admin → Roles & tags); for a token room the address needs the required balance. (Also confirm your wallet is still an admin of this room.)";
+  }
+  if (code === "401") return "Push rejected the request (401) — your messaging session may have expired. Reload the page and re-enable messaging.";
+  if (code) return `Push request failed (HTTP ${code}). ${msg}`;
+  return msg || "Failed";
+}
+
 export default function Messenger() {
   const { isConnected } = useAccount();
   return (
@@ -920,7 +940,7 @@ function CommunityGroups() {
       scrollRoomRef.current = true; // jump to newest on open
       qc.invalidateQueries({ queryKey: ["joined-chats"] }); // reflect new membership in the list
     } catch (e) {
-      setError(humanError(e));
+      setError(describePushError(e));
     } finally {
       setBusyKey(undefined);
     }
@@ -1178,7 +1198,7 @@ function ManageMembers({ push, chatId, me, roomKey, icon }: { push: PushClient; 
       setAddr("");
       await load();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed");
+      setErr(describePushError(e));
     } finally {
       setBusy(false);
     }
@@ -1197,7 +1217,7 @@ function ManageMembers({ push, chatId, me, roomKey, icon }: { push: PushClient; 
   async function remove(wallet: string) {
     setBusy(true); setErr(undefined);
     try { await removeFromRoom(push, chatId, [wallet], "MEMBER"); await load(); }
-    catch (e) { setErr(e instanceof Error ? e.message : "Failed"); }
+    catch (e) { setErr(describePushError(e)); }
     finally { setBusy(false); }
   }
 
