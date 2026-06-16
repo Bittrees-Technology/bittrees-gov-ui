@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useAccount, usePublicClient } from "wagmi";
+import { useAccount, usePublicClient, useEnsName, useEnsAvatar } from "wagmi";
 import { getAddress, isAddress, formatEther } from "viem";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useXmtp, type ConvSummary, type ChatMessage, type ReplyRef } from "../lib/xmtp";
@@ -19,6 +19,7 @@ import {
 } from "../lib/dmPrefs";
 import { addContact } from "../lib/contacts";
 import { ensAvailable, ensYearPriceWei, ensLabel, ensAppUrl } from "../lib/ens";
+import { useProfileAvatar, setProfileAvatar, clearProfileAvatar } from "../lib/profile";
 import { useSavedMessages, addSavedMessage, deleteSavedMessage } from "../lib/savedMessages";
 import { useVotingPowerNow } from "../lib/snapshot";
 import {
@@ -31,6 +32,7 @@ import {
   roomMembers,
   setRoomRole,
   removeFromRoom,
+  roomLatestTs,
   gateUrl,
   type PushRoom,
   type PushMessage,
@@ -111,34 +113,37 @@ function MessengerHome({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
   const { address } = useAccount();
   const [view, setView] = useState<ShellView>("chat");
   const [openSaved, setOpenSaved] = useState(false);
-  const [openRooms, setOpenRooms] = useState(false);
+  const [roomsOpen, setRoomsOpen] = useState(false);
+  const [roomKey, setRoomKey] = useState<string>(); // a specific room, or undefined = browse list
 
   // Saved Messages = a real DM with your own wallet when XMTP allows it; otherwise a
   // device-local notes store. Try the self-DM first, fall back to local notes.
-  const openSavedMessages = async () => { if (!(await xmtp.startSelfDm())) setOpenSaved(true); };
+  const openSavedMessages = async () => { xmtp.clearError(); if (!(await xmtp.startSelfDm())) setOpenSaved(true); };
+  const openRoom = (key: string) => { xmtp.clearError(); setRoomKey(key); setRoomsOpen(true); };
+  const browseRooms = () => { xmtp.clearError(); setRoomKey(undefined); setRoomsOpen(true); };
 
-  // Selecting any chat replaces the whole panel (full-screen), with a back arrow.
-  if (openRooms) {
+  // Full-screen views (Telegram-style: the list is replaced, a back arrow returns).
+  if (roomsOpen) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-        <button onClick={() => setOpenRooms(false)} style={{ ...linkBtn, alignSelf: "flex-start", fontSize: "0.85rem", color: "var(--color-primary-hover)", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+        <button onClick={() => setRoomsOpen(false)} style={{ ...linkBtn, alignSelf: "flex-start", fontSize: "0.85rem", color: "var(--color-primary-hover)", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
           <IconBack /> All chats
         </button>
-        <CommunityGroups />
+        <CommunityGroups initialRoomKey={roomKey} />
       </div>
     );
   }
-  if (openSaved) return <SavedChatView owner={address} onBack={() => setOpenSaved(false)} />;
-  if (xmtp.activeId) return <DmChatView xmtp={xmtp} onBack={() => xmtp.closeConversation()} />;
+  if (openSaved) return <SavedChatView owner={address} onBack={() => { xmtp.clearError(); setOpenSaved(false); }} />;
+  if (xmtp.activeId) return <DmChatView xmtp={xmtp} onBack={() => { xmtp.clearError(); xmtp.closeConversation(); }} />;
 
   return (
-    <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: "480px" }}>
-      <MessengerToolbar view={view} setView={setView} />
+    <div className="card msg-shell" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <MessengerToolbar view={view} setView={(v) => { xmtp.clearError(); setView(v); }} />
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-        {view === "chat" && <ChatListView xmtp={xmtp} onOpenSaved={openSavedMessages} onOpenRooms={() => setOpenRooms(true)} />}
+        {view === "chat" && <ChatListView xmtp={xmtp} onOpenSaved={openSavedMessages} onOpenRoom={openRoom} onBrowseRooms={browseRooms} />}
         {view === "contacts" && <ContactsView onMessage={(addr) => { void xmtp.startDm(addr); }} />}
         {view === "search" && <SearchView xmtp={xmtp} />}
-        {view === "settings" && <SettingsView onUnblock={(a) => void xmtp.setPeerConsent(a, true)} />}
+        {view === "settings" && <SettingsView xmtp={xmtp} />}
       </div>
       {xmtp.error && (
         <p role="alert" style={{ fontFamily: "var(--font-sans)", fontSize: "0.78rem", color: "var(--color-ink)", padding: "0 0.85rem 0.85rem", margin: 0 }}>{xmtp.error}</p>
@@ -176,12 +181,28 @@ function MessengerToolbar({ view, setView }: { view: ShellView; setView: (v: She
 
 /* The conversation list (Telegram-style): Archived (top) · Saved Messages · Requests
    · Pinned · recent DMs · a Community-rooms entry. */
-function ChatListView({ xmtp, onOpenSaved, onOpenRooms }: { xmtp: ReturnType<typeof useXmtp>; onOpenSaved: () => void; onOpenRooms: () => void }) {
+function ChatListView({ xmtp, onOpenSaved, onOpenRoom, onBrowseRooms }: { xmtp: ReturnType<typeof useXmtp>; onOpenSaved: () => void; onOpenRoom: (key: string) => void; onBrowseRooms: () => void }) {
   const prefs = useDmPrefs();
   const blocked = useBlocked();
   const [menuId, setMenuId] = useState<string>();
   const [showArchived, setShowArchived] = useState(false);
   const [showRequests, setShowRequests] = useState(true);
+
+  // Community rooms the wallet can access — pinned to the top, with a per-room unread
+  // flag (the room's latest message vs. when it was last opened).
+  const rooms = useAccessibleRooms();
+  const push = usePush();
+  const roomLatest = useQuery({
+    queryKey: ["rooms-latest", rooms.map((r) => r.key).join(",")],
+    enabled: push.status === "ready" && rooms.length > 0,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const out: Record<string, number> = {};
+      await Promise.all(rooms.map(async (r) => { out[r.key] = r.chatId && push.client ? await roomLatestTs(push.client, r.chatId) : 0; }));
+      return out;
+    },
+  });
+  const roomUnread = (r: PushRoom) => (roomLatest.data?.[r.key] ?? 0) > (prefs[`room:${r.key}`]?.lastReadAt ?? 0);
 
   const { pinned, recent, archived, requests } = useMemo(() => {
     const blk = new Set(blocked);
@@ -233,7 +254,17 @@ function ChatListView({ xmtp, onOpenSaved, onOpenRooms }: { xmtp: ReturnType<typ
 
   return (
     <div>
-      {/* Archived — pinned to the very top */}
+      {/* Community rooms you can access — pinned above everything (with unread flags) */}
+      {rooms.length > 0 && (
+        <>
+          <ListHeader>Community rooms</ListHeader>
+          {rooms.map((r) => (
+            <RoomListRow key={r.key} room={r} unread={roomUnread(r)} onOpen={() => { markRead(`room:${r.key}`, Date.now()); onOpenRoom(r.key); }} />
+          ))}
+        </>
+      )}
+
+      {/* Archived */}
       {archived.length > 0 && (
         <>
           <button onClick={() => setShowArchived((v) => !v)} style={discloseStyle}>
@@ -267,15 +298,44 @@ function ChatListView({ xmtp, onOpenSaved, onOpenRooms }: { xmtp: ReturnType<typ
       )}
       {recent.map((c) => <ConvRow key={c.id} {...rowProps(c)} />)}
 
-      {/* Community rooms — token-gated group chat */}
-      <SpecialRow icon="🏛" title="Community rooms" subtitle="Token-gated group chat" onClick={onOpenRooms} />
+      {/* Browse / join more community rooms */}
+      <SpecialRow icon="🏛" title={rooms.length > 0 ? "Browse all rooms" : "Community rooms"} subtitle="Token-gated group chat" onClick={onBrowseRooms} />
 
-      {noChats && <p style={{ ...dim, padding: "1rem" }}>No conversations yet — use Search or Contacts to start one.</p>}
+      {noChats && rooms.length === 0 && <p style={{ ...dim, padding: "1rem" }}>No conversations yet — use Search or Contacts to start one.</p>}
     </div>
   );
 }
 
-/** A non-DM list entry (Saved Messages, Community rooms) with an icon + chevron. */
+/** Community rooms the connected wallet can access (registry + the same /api/gate
+ *  check Push uses), with live chatIds. These are pinned at the top of the chat list. */
+function useAccessibleRooms(): PushRoom[] {
+  const { address } = useAccount();
+  const { data: registry } = useRoomRegistry();
+  const chatIds = registry?.chatIds;
+  const customRooms = registry?.custom ?? [];
+  const bgovRooms = BGOV_ROOMS.map((r) => ({ ...r, chatId: chatIds?.[r.key] ?? r.chatId }));
+  const safeRooms = SAFE_ROOMS.map((r) => ({ ...r, chatId: chatIds?.[r.key] ?? r.chatId }));
+  const allRooms: PushRoom[] = [...bgovRooms, ...safeRooms, ...customRooms];
+  const { data: access } = useRoomAccess(allRooms, address);
+  return allRooms.filter((r) => access?.[r.key] === true && !!r.chatId);
+}
+
+/** A community-room row in the chat list, with an unread dot. */
+function RoomListRow({ room, unread, onOpen }: { room: PushRoom; unread: boolean; onOpen: () => void }) {
+  return (
+    <button onClick={onOpen} style={{ display: "flex", alignItems: "center", gap: "0.6rem", width: "100%", textAlign: "left", padding: "0.55rem 0.85rem", border: "none", borderBottom: "1px solid var(--color-border-light)", background: "none", cursor: "pointer", fontFamily: "var(--font-sans)" }}>
+      <span style={{ width: 32, height: 32, flexShrink: 0, borderRadius: "50%", background: "var(--color-bg-subtle)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "0.95rem" }}>🏛</span>
+      <span style={{ minWidth: 0, flex: 1 }}>
+        <span style={{ display: "block", fontSize: "0.85rem", fontWeight: unread ? 700 : 600, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{room.name}</span>
+        <span style={{ display: "block", fontSize: "0.72rem", color: "var(--color-ink-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{room.blurb}</span>
+      </span>
+      {unread && <span aria-label="unread" style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--color-primary)", flexShrink: 0 }} />}
+      <span style={{ color: "var(--color-ink-dim)", flexShrink: 0 }}>›</span>
+    </button>
+  );
+}
+
+/** A non-DM list entry (Saved Messages, browse rooms) with an icon + chevron. */
 function SpecialRow({ icon, title, subtitle, onClick }: { icon: string; title: string; subtitle: string; onClick: () => void }) {
   return (
     <button onClick={onClick} style={{ display: "flex", alignItems: "center", gap: "0.6rem", width: "100%", textAlign: "left", padding: "0.6rem 0.85rem", border: "none", borderBottom: "1px solid var(--color-border-light)", background: "none", cursor: "pointer", fontFamily: "var(--font-sans)" }}>
@@ -310,7 +370,7 @@ function DmChatView({ xmtp, onBack }: { xmtp: ReturnType<typeof useXmtp>; onBack
   }
 
   return (
-    <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: "480px" }}>
+    <div className="card msg-shell" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.5rem 0.7rem", borderBottom: "1px solid var(--color-border)" }}>
         <BackButton onClick={onBack} />
         <span style={{ display: "inline-flex", alignItems: "center", minWidth: 0, fontFamily: "var(--font-sans)", fontSize: "0.9rem", fontWeight: 700, color: "var(--color-ink)" }}>
@@ -348,7 +408,7 @@ function SavedChatView({ owner, onBack }: { owner?: string; onBack: () => void }
     id: s.id, senderInboxId: "me", mine: true, text: s.text, sentAtMs: s.sentAtMs, status: "sent", reactions: [], readByPeer: false,
   }));
   return (
-    <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: "480px" }}>
+    <div className="card msg-shell" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.5rem 0.7rem", borderBottom: "1px solid var(--color-border)" }}>
         <BackButton onClick={onBack} />
         <span style={{ minWidth: 0 }}>
@@ -445,18 +505,19 @@ function SearchView({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
 }
 
 /** Settings: read-receipts toggle + blocked-list management. */
-function SettingsView({ onUnblock }: { onUnblock: (addr: string) => void }) {
+function SettingsView({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
   const settings = useDmSettings();
   const blocked = useBlocked();
   return (
     <div style={{ padding: "0.85rem", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+      <ProfileSection owner={xmtp.selfAddress} />
+      <EnsTool xmtp={xmtp} />
       <ToggleRow
         label="Read receipts (default)"
         desc="The default for every chat — override it per conversation from the chat header. When on, people see when you've read their messages and you see when they've read yours."
         on={settings.readReceipts}
         onToggle={() => setReadReceipts(!settings.readReceipts)}
       />
-      <EnsTool />
       <div>
         <p className="text-label" style={{ marginBottom: "0.4rem" }}>Blocked ({blocked.length})</p>
         {blocked.length === 0 ? (
@@ -466,14 +527,59 @@ function SettingsView({ onUnblock }: { onUnblock: (addr: string) => void }) {
             {blocked.map((addr) => (
               <div key={addr} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem", padding: "0.3rem 0" }}>
                 <span style={{ minWidth: 0, overflow: "hidden" }}><AddressName address={addr} /></span>
-                <button onClick={() => { unblockAddr(addr); onUnblock(addr); }} style={{ ...linkBtn, fontSize: "0.74rem", color: "var(--color-primary-hover)", flexShrink: 0 }}>Unblock</button>
+                <button onClick={() => { unblockAddr(addr); void xmtp.setPeerConsent(addr, true); }} style={{ ...linkBtn, fontSize: "0.74rem", color: "var(--color-primary-hover)", flexShrink: 0 }}>Unblock</button>
               </div>
             ))}
           </div>
         )}
       </div>
       <p style={{ ...dim, lineHeight: 1.6, margin: 0 }}>
-        Direct messages are end-to-end encrypted over XMTP. Saved Messages and these preferences are stored only on this device.
+        Direct messages are end-to-end encrypted over XMTP. Saved Messages, your profile picture, and these preferences are stored only on this device.
+      </p>
+    </div>
+  );
+}
+
+/** Your messenger profile: avatar (local override, else your ENS avatar) + identity. */
+function ProfileSection({ owner }: { owner?: string }) {
+  const local = useProfileAvatar(owner);
+  const { data: ensName } = useEnsName({ address: owner as `0x${string}` | undefined, chainId: mainnet.id });
+  const { data: ensAvatar } = useEnsAvatar({ name: ensName ? normalize(ensName) : undefined, chainId: mainnet.id });
+  const avatar = local || ensAvatar || null;
+  const fileRef = useRef<HTMLInputElement>(null);
+  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 800_000) { alert("Please choose an image under ~800 KB."); return; }
+    const reader = new FileReader();
+    reader.onload = () => setProfileAvatar(owner, String(reader.result));
+    reader.readAsDataURL(f);
+    e.target.value = "";
+  }
+  return (
+    <div>
+      <p className="text-label" style={{ marginBottom: "0.5rem" }}>Profile</p>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.85rem" }}>
+        <div style={{ width: 56, height: 56, flexShrink: 0, borderRadius: "50%", overflow: "hidden", background: "var(--color-bg-subtle)", border: "1px solid var(--color-border)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+          {avatar ? (
+            <img src={avatar} alt="" width={56} height={56} style={{ width: 56, height: 56, objectFit: "cover" }} onError={(ev) => { (ev.currentTarget as HTMLImageElement).style.display = "none"; }} />
+          ) : (
+            <span style={{ fontSize: "1.5rem" }}>👤</span>
+          )}
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontFamily: "var(--font-sans)", fontSize: "0.9rem", fontWeight: 700, color: "var(--color-ink)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {owner ? <AddressName address={owner} /> : "Not connected"}
+          </div>
+          <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.4rem", flexWrap: "wrap" }}>
+            <button onClick={() => fileRef.current?.click()} style={settingsBtn}>Upload picture</button>
+            {local && <button onClick={() => clearProfileAvatar(owner)} style={settingsBtn}>Remove</button>}
+            <input ref={fileRef} type="file" accept="image/*" onChange={onFile} style={{ display: "none" }} />
+          </div>
+        </div>
+      </div>
+      <p style={{ ...dim, fontSize: "0.72rem", marginTop: "0.45rem", lineHeight: 1.5 }}>
+        Stored on this device. {ensAvatar && !local ? "Currently showing your ENS avatar — set on ENS to make it visible to others." : "Your ENS avatar is the picture other apps see."}
       </p>
     </div>
   );
@@ -522,11 +628,13 @@ function ReceiptsControl({ convId }: { convId: string }) {
 
 /** ENS lookup tool for Settings: resolve a name↔address, check availability + price,
  *  and hand off the actual registration to the audited ENS app. */
-function EnsTool() {
+function EnsTool({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
   const client = usePublicClient({ chainId: mainnet.id });
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [out, setOut] = useState<React.ReactNode>();
+  const [foundAddr, setFoundAddr] = useState<string>(); // a resolved address → can chat / save
+  const [actMsg, setActMsg] = useState<string>();
   const shorten = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
   async function lookup() {
@@ -534,17 +642,21 @@ function EnsTool() {
     if (!v || !client) return;
     setBusy(true);
     setOut(undefined);
+    setFoundAddr(undefined);
+    setActMsg(undefined);
     try {
       if (isAddress(v)) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const name = await (client as any).getEnsName({ address: getAddress(v) });
         setOut(name ? <>Primary name: <strong>{name}</strong></> : "No primary ENS name set for this address.");
+        setFoundAddr(getAddress(v));
       } else {
         const name = v.toLowerCase().endsWith(".eth") ? v.toLowerCase() : `${v.toLowerCase()}.eth`;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const addr = await (client as any).getEnsAddress({ name: normalize(name) }).catch(() => null);
         if (addr) {
           setOut(<><strong>{name}</strong> → {shorten(addr)} · already registered</>);
+          setFoundAddr(getAddress(addr));
         } else {
           const label = ensLabel(name);
           const avail = await ensAvailable(client, label).catch(() => null);
@@ -572,11 +684,18 @@ function EnsTool() {
     <div>
       <p className="text-label" style={{ marginBottom: "0.4rem" }}>ENS</p>
       <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-        <input value={q} onChange={(e) => { setQ(e.target.value); setOut(undefined); }} onKeyDown={(e) => e.key === "Enter" && lookup()} placeholder="name.eth or 0x address" style={{ ...inputStyle, flex: 1, minWidth: "170px" }} />
+        <input value={q} onChange={(e) => { setQ(e.target.value); setOut(undefined); setFoundAddr(undefined); setActMsg(undefined); }} onKeyDown={(e) => e.key === "Enter" && lookup()} placeholder="name.eth or 0x address" style={{ ...inputStyle, flex: 1, minWidth: "170px" }} />
         <button className="btn-primary" onClick={lookup} disabled={busy || !q.trim()} style={{ padding: "0.4rem 0.8rem", fontSize: "0.82rem", opacity: busy || !q.trim() ? 0.6 : 1 }}>{busy ? "…" : "Look up"}</button>
       </div>
       {out && <p style={{ ...dim, marginTop: "0.5rem", lineHeight: 1.55, color: "var(--color-ink-muted)" }}>{out}</p>}
-      <p style={{ ...dim, marginTop: "0.35rem", fontSize: "0.72rem" }}>Resolve names &amp; addresses, check availability, and register via the official ENS app.</p>
+      {foundAddr && (
+        <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
+          <button className="btn-primary" onClick={() => void xmtp.startDm(foundAddr)} style={{ padding: "0.35rem 0.75rem", fontSize: "0.8rem" }}>Start chat</button>
+          <button onClick={() => { addContact(xmtp.selfAddress, getAddress(foundAddr)); setActMsg("Saved to Contacts."); }} style={settingsBtn}>☆ Save contact</button>
+        </div>
+      )}
+      {actMsg && <p style={{ ...dim, marginTop: "0.35rem" }}>{actMsg}</p>}
+      <p style={{ ...dim, marginTop: "0.35rem", fontSize: "0.72rem" }}>Resolve names &amp; addresses, check availability, and register via the official ENS app. If a wallet is on XMTP you can start a chat or save them here.</p>
     </div>
   );
 }
@@ -710,11 +829,12 @@ function useRoomAccess(rooms: PushRoom[], address?: string) {
 }
 
 /* ── Community rooms (Push, token-gated) ────────────────────────────────── */
-function CommunityGroups() {
+function CommunityGroups({ initialRoomKey }: { initialRoomKey?: string }) {
   const { address } = useAccount();
   const { data: vpData } = useVotingPowerNow(address);
   const { data: registry } = useRoomRegistry();
   const bgov = vpData ?? 0;
+  const autoOpenedRef = useRef(false);
 
   // Registry (runtime, Vercel KV) chatIds win over env (build-time) fallbacks.
   const chatIds = registry?.chatIds;
@@ -748,12 +868,21 @@ function CommunityGroups() {
       setOpenRoom(room);
       setMessages(page.messages);
       setOlderCursor(page.cursor);
+      markRead(`room:${room.key}`, Date.now()); // clears the chat-list unread flag
     } catch (e) {
       setError(humanError(e));
     } finally {
       setBusyKey(undefined);
     }
   }
+
+  // Deep-link: when launched for a specific room (from the chat list), open it once.
+  useEffect(() => {
+    if (autoOpenedRef.current || !initialRoomKey || openRoom || push.status !== "ready") return;
+    const room = allRooms.find((r) => r.key === initialRoomKey);
+    if (room?.chatId) { autoOpenedRef.current = true; void open(room); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialRoomKey, openRoom, push.status, registry]);
 
   async function loadOlder() {
     if (!openRoom?.chatId || !push.client || !address || !olderCursor || loadingOlder) return;
@@ -1262,4 +1391,5 @@ const inputStyle = {
 };
 const linkBtn = { background: "none", border: "none", cursor: "pointer", fontFamily: "var(--font-sans)", fontSize: "0.8rem", color: "var(--color-ink-muted)", padding: 0 } as const;
 const dim = { fontFamily: "var(--font-sans)", fontSize: "0.85rem", color: "var(--color-ink-dim)" } as const;
+const settingsBtn = { padding: "0.35rem 0.7rem", fontFamily: "var(--font-sans)", fontSize: "0.8rem", fontWeight: 600, color: "var(--color-ink)", background: "#ffffff", border: "1px solid var(--color-border)", borderRadius: "2px", cursor: "pointer" } as const;
 const discloseStyle = { display: "block", width: "100%", textAlign: "left" as const, padding: "0.55rem 0.85rem", border: "none", borderTop: "1px solid var(--color-border-light)", background: "var(--color-bg-subtle)", cursor: "pointer", fontFamily: "var(--font-sans)", fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.06em", color: "var(--color-ink-dim)" } as const;

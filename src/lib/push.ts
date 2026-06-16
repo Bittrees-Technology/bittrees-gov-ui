@@ -169,19 +169,29 @@ export async function initPush(walletClient: WalletClient, account: string): Pro
   }
 }
 
-export interface PushMessage { id: string; from: string; text: string; mine: boolean }
+export interface PushMessage { id: string; from: string; text: string; mine: boolean; ts?: number }
 
 function normalize(raw: any[], myAddr: string): PushMessage[] {
   const me = myAddr.toLowerCase();
   return (raw || []).map((m, i) => {
     const from = String(m?.fromDID || m?.fromCAIP10 || "").split(":").pop()?.toLowerCase() || "";
     const text = typeof m?.messageContent === "string" ? m.messageContent : (m?.messageObj?.content ?? "(unsupported)");
-    return { id: m?.cid || String(m?.timestamp ?? i), from, text: String(text), mine: from === me };
+    return { id: m?.cid || String(m?.timestamp ?? i), from, text: String(text), mine: from === me, ts: Number(m?.timestamp) || undefined };
   });
 }
 
 export async function joinRoom(push: PushClient, chatId: string) {
   return push.chat.group.join(chatId);
+}
+
+/** Timestamp (ms) of a room's most recent message — for the unread flag. 0 if none. */
+export async function roomLatestTs(push: PushClient, chatId: string): Promise<number> {
+  try {
+    const raw = await push.chat.history(chatId, { limit: 1 });
+    return Number((raw as any[])?.[0]?.timestamp) || 0;
+  } catch {
+    return 0;
+  }
 }
 
 /** A page of room history (oldest→newest) + a cursor to fetch the NEXT older page

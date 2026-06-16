@@ -315,17 +315,14 @@ h2, h3, h4, h5, h6 {
   }
 }
 
-/* Direct messages: People (contacts + search) partitioned to the left of the chat
-   on wide screens; stacked on narrow ones. */
-.dm-layout {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 1rem;
-  align-items: start;
+/* Messenger shell (single-pane, Telegram-style). On phones it fills most of the
+   viewport for a full-app feel; on desktop it's a comfortable fixed minimum. */
+.msg-shell {
+  min-height: 480px;
 }
-@media (min-width: 860px) {
-  .dm-layout {
-    grid-template-columns: minmax(240px, 300px) 1fr;
+@media (max-width: 640px) {
+  .msg-shell {
+    min-height: calc(100dvh - 200px);
   }
 }
 

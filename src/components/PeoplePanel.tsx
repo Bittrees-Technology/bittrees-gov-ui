@@ -54,7 +54,7 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
   const contacts = useContacts(address);
   const roleOptions = selectableRoles(community?.roledefs);
 
-  const [roleFilter, setRoleFilter] = useState(SHAREHOLDER);
+  const [roleFilter, setRoleFilter] = useState(""); // "" = nothing picked yet
   const [bcastOpen, setBcastOpen] = useState(false);
   const [bcastText, setBcastText] = useState("");
   const [bcasting, setBcasting] = useState(false);
@@ -73,6 +73,7 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
   const { data: vps, isLoading: vpLoading } = useVotingPowers(needVp ? universe : []);
 
   const shown: string[] = useMemo(() => {
+    if (roleFilter === "") return [];
     const blk = new Set(blocked);
     let base: string[];
     if (roleFilter === SHAREHOLDER) base = universe.filter((a) => (vps?.[a] ?? 0) >= 1);
@@ -106,6 +107,7 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
     <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
       <p className="text-label" style={{ margin: 0 }}>Search by role</p>
       <select value={roleFilter} onChange={(e) => { setRoleFilter(e.target.value); setBcastOpen(false); setBcastMsg(undefined); }} style={inputStyle}>
+        <option value="">Select a role…</option>
         <option value={SHAREHOLDER}>Shareholders (≥1 BGOV)</option>
         {roleOptions.map((o) => <option key={o.label} value={o.label}>{o.label}</option>)}
       </select>
@@ -114,7 +116,7 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
         {needVp && vpLoading ? (
           <p style={{ ...dim, margin: "0.3rem 0" }}>Checking BGOV holdings…</p>
         ) : sortedShown.length === 0 ? (
-          <p style={{ ...dim, margin: "0.3rem 0" }}>No one found for that role.</p>
+          <p style={{ ...dim, margin: "0.3rem 0" }}>{roleFilter === "" ? "Pick a role to list who holds it." : "No one found for that role."}</p>
         ) : (
           sortedShown.map((addr) => (
             <PersonRow
@@ -195,7 +197,6 @@ function ContactRow({ owner, address, label, onMessage }: { owner?: string; addr
         ) : (
           <AddressName address={address} avatar />
         )}
-        <UserBadges address={address} />
       </span>
       {editing ? (
         <span style={{ display: "inline-flex", gap: "0.3rem", alignItems: "center", flexShrink: 0 }}>
