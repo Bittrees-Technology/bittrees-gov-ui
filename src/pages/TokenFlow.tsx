@@ -30,14 +30,24 @@ const N = {
   extra: { cx: 764, cy: 788, r: 66 },
 } satisfies Record<string, Disc>;
 
-/** Point on `a`'s circumference pointing toward `b` (so connectors meet the edge). */
-function edge(a: Disc, b: Disc): [number, number] {
-  const dx = b.cx - a.cx;
-  const dy = b.cy - a.cy;
+/** Point on `a`'s circumference pointing toward (px,py) — so connectors meet the edge. */
+function edgeToward(a: Disc, px: number, py: number): [number, number] {
+  const dx = px - a.cx;
+  const dy = py - a.cy;
   const d = Math.hypot(dx, dy) || 1;
   return [a.cx + (dx / d) * a.r, a.cy + (dy / d) * a.r];
 }
+const edge = (a: Disc, b: Disc): [number, number] => edgeToward(a, b.cx, b.cy);
 const mid = (p: [number, number], q: [number, number]): [number, number] => [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+
+/** A connector from `from` to `to` bowed through control point `cp`. Used for the long
+ *  Revenue/Capital → Contributors lines so they arc outside the B.T.C. group bubbles
+ *  instead of passing underneath them. */
+function curvePath(from: Disc, to: Disc, cp: [number, number]): string {
+  const [sx, sy] = edgeToward(from, cp[0], cp[1]);
+  const [ex, ey] = edgeToward(to, cp[0], cp[1]);
+  return `M ${sx} ${sy} Q ${cp[0]} ${cp[1]} ${ex} ${ey}`;
+}
 
 interface BubbleProps {
   node: Disc;
@@ -93,14 +103,17 @@ function Pill({ at, text }: { at: [number, number]; text: string }) {
 }
 
 function FlowDiagram() {
-  // Every flow as a source→target pair; endpoints computed against the circle edges.
+  // Straight connectors (endpoints computed against the circle edges). The two long
+  // Revenue/Capital → Contributors lines are drawn separately as curves (below) so they
+  // arc outside the B.T.C. group bubbles rather than passing underneath them.
   const flows: [Disc, Disc][] = [
     [N.revenue, N.inc], [N.capital, N.inc],
     [N.inc, N.business], [N.inc, N.tech], [N.inc, N.community],
     [N.business, N.contrib], [N.tech, N.contrib], [N.community, N.contrib],
-    [N.revenue, N.contrib], [N.capital, N.contrib],
     [N.inc, N.br], [N.inc, N.extra],
   ];
+  const CP_L: [number, number] = [340, 320]; // bows Revenue → Contributors left of Business
+  const CP_R: [number, number] = [900, 320]; // bows Capital → Contributors right of Community
 
   return (
     <svg viewBox="0 0 1240 980" width="100%" height="auto" role="img" aria-label="Bittrees revenue and token flow" style={{ display: "block" }}>
@@ -124,6 +137,8 @@ function FlowDiagram() {
         const [x2, y2] = edge(b, a);
         return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={LINE} strokeWidth={1.8} markerEnd="url(#arrow)" />;
       })}
+      <path d={curvePath(N.revenue, N.contrib, CP_L)} fill="none" stroke={LINE} strokeWidth={1.8} markerEnd="url(#arrow)" />
+      <path d={curvePath(N.capital, N.contrib, CP_R)} fill="none" stroke={LINE} strokeWidth={1.8} markerEnd="url(#arrow)" />
 
       {/* ── Nodes ── */}
       <Bubble node={N.contrib} fill={GREEN_LIGHT} color={INK} size={18} lines={["Bittrees", "Contributors"]} />
