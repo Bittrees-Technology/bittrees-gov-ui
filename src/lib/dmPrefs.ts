@@ -122,3 +122,44 @@ export function unblockAddr(address: string) {
   blockCache = blockCache.filter((x) => x !== a);
   persistBlocked();
 }
+
+/* ── global DM settings ─────────────────────────────────────────────────── */
+export interface DmSettings {
+  readReceipts: boolean; // send read receipts to peers (and thus see theirs)
+}
+const SETTINGS_KEY = "bittrees.dm.settings";
+const settingsListeners = new Set<() => void>();
+
+function loadSettings(): DmSettings {
+  try {
+    const v = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+    return { readReceipts: v?.readReceipts !== false }; // default ON
+  } catch {
+    return { readReceipts: true };
+  }
+}
+
+let settingsCache: DmSettings = loadSettings();
+
+function persistSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settingsCache)); } catch { /* ignore */ }
+  settingsListeners.forEach((l) => l());
+}
+
+export function useDmSettings(): DmSettings {
+  return useSyncExternalStore(
+    (cb) => { settingsListeners.add(cb); return () => { settingsListeners.delete(cb); }; },
+    () => settingsCache,
+    () => settingsCache
+  );
+}
+
+export function setReadReceipts(on: boolean) {
+  settingsCache = { ...settingsCache, readReceipts: on };
+  persistSettings();
+}
+
+/** Non-hook read for the XMTP layer (decides whether to emit read receipts). */
+export function readReceiptsEnabled(): boolean {
+  return settingsCache.readReceipts;
+}

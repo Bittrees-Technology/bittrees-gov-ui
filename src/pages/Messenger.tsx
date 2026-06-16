@@ -1,11 +1,13 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useXmtp, type ConvSummary } from "../lib/xmtp";
+import { useXmtp, type ConvSummary, type ChatMessage, type ReplyRef } from "../lib/xmtp";
 import {
   useDmPrefs,
   useBlocked,
+  useDmSettings,
+  setReadReceipts,
   togglePin,
   setArchived,
   markRead,
@@ -139,8 +141,12 @@ function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
   const [menuId, setMenuId] = useState<string>();
   const [showArchived, setShowArchived] = useState(false);
   const [showBlocked, setShowBlocked] = useState(false);
+  const [showRequests, setShowRequests] = useState(true);
+  const [replyingTo, setReplyingTo] = useState<ChatMessage>();
   const prefs = useDmPrefs();
   const blocked = useBlocked();
+  const settings = useDmSettings();
+  const active = xmtp.conversations.find((c) => c.id === xmtp.activeId);
 
   // Keep the open conversation marked read as it's viewed / new messages arrive.
   useEffect(() => {
@@ -149,11 +155,15 @@ function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
 
   // Partition: pinned (manual order) → recent (newest first) → archived → blocked.
   // DMs whose peer is blocked are dropped from the visible list entirely.
-  const { pinned, recent, archived } = useMemo(() => {
+  const { pinned, recent, archived, requests } = useMemo(() => {
     const blk = new Set(blocked);
-    const visible = xmtp.conversations.filter(
+    const notBlocked = xmtp.conversations.filter(
       (c) => !(c.kind === "dm" && c.peerAddress && blk.has(c.peerAddress.toLowerCase()))
     );
+    // Inbound DMs we haven't consented to yet surface as requests, not the main list.
+    const isRequest = (c: ConvSummary) => c.kind === "dm" && c.consent === "unknown" && !c.lastFromMe;
+    const visible = notBlocked.filter((c) => c.consent !== "denied" && !isRequest(c));
+    const reqs = notBlocked.filter(isRequest).sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0));
     const arch = visible.filter((c) => prefs[c.id]?.archived);
     const live = visible.filter((c) => !prefs[c.id]?.archived);
     const pin = live
@@ -162,7 +172,7 @@ function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
     const rec = live
       .filter((c) => !prefs[c.id]?.pinned)
       .sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0));
-    return { pinned: pin, recent: rec, archived: arch };
+    return { pinned: pin, recent: rec, archived: arch, requests: reqs };
   }, [xmtp.conversations, prefs, blocked]);
 
   function move(id: string, dir: "up" | "down") {
@@ -198,8 +208,11 @@ function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
   }
   async function send() {
     const t = draft;
+    if (!t.trim()) return;
     setDraft("");
-    await xmtp.sendMessage(t);
+    const r = replyingTo;
+    setReplyingTo(undefined);
+    await xmtp.sendMessage(t, r ? { id: r.id, senderInboxId: r.senderInboxId, text: r.text, mine: r.mine } : undefined);
   }
 
   const isUnread = (c: ConvSummary) =>
@@ -232,6 +245,22 @@ function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
               <p style={{ ...dim, padding: "1rem" }}>No conversations yet. Start one with an address above.</p>
             ) : (
               <>
+                {requests.length > 0 && (
+                  <>
+                    <button onClick={() => setShowRequests((v) => !v)} style={{ ...discloseStyle, color: "var(--color-primary-hover)" }}>
+                      {showRequests ? "▾" : "▸"} Requests ({requests.length})
+                    </button>
+                    {showRequests && requests.map((c) => (
+                      <RequestRow
+                        key={c.id}
+                        c={c}
+                        onOpen={() => xmtp.openConversation(c.id)}
+                        onAccept={() => xmtp.setConvConsent(c.id, true)}
+                        onDecline={() => xmtp.setConvConsent(c.id, false)}
+                      />
+                    ))}
+                  </>
+                )}
                 {pinned.length > 0 && (
                   <>
                     <ListHeader>Pinned</ListHeader>
@@ -277,14 +306,24 @@ function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
             </div>
           ) : (
             <>
-              <div style={{ flex: 1, overflowY: "auto", padding: "1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                {xmtp.messages.length === 0 ? (
-                  <p style={{ ...dim, margin: "auto" }}>No messages yet — say hello.</p>
-                ) : (
-                  xmtp.messages.map((m) => <Bubble key={m.id} mine={m.mine} text={m.text} />)
-                )}
-              </div>
-              <Composer value={draft} setValue={setDraft} onSend={send} />
+              <ChatHeader
+                peer={active?.peerAddress}
+                title={active?.kind === "group" ? active.title : undefined}
+                receipts={settings.readReceipts}
+                onToggleReceipts={() => setReadReceipts(!settings.readReceipts)}
+              />
+              <DmMessageList
+                messages={xmtp.messages}
+                onReact={(id, inbox, emoji) => void xmtp.toggleReaction(id, inbox, emoji)}
+                onReply={setReplyingTo}
+                onRetry={(id) => void xmtp.retryMessage(id)}
+              />
+              <Composer
+                value={draft}
+                setValue={setDraft}
+                onSend={send}
+                header={replyingTo ? <ReplyBanner m={replyingTo} onCancel={() => setReplyingTo(undefined)} /> : undefined}
+              />
             </>
           )}
         </section>
@@ -722,17 +761,235 @@ function RoomMessage({ m, myAddress }: { m: PushMessage; myAddress?: string }) {
 
 function Bubble({ mine, text }: { mine: boolean; text: string }) {
   return (
-    <div style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "78%", padding: "0.5rem 0.75rem", borderRadius: "10px", background: mine ? "var(--color-primary)" : "var(--color-bg-subtle)", color: mine ? "#ffffff" : "var(--color-ink)", fontFamily: "var(--font-sans)", fontSize: "0.875rem", lineHeight: 1.5, wordBreak: "break-word" }}>
+    <div style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "78%", padding: "0.5rem 0.75rem", borderRadius: "10px", background: mine ? "var(--color-primary)" : "var(--color-bg-subtle)", color: mine ? "#ffffff" : "var(--color-ink)", fontFamily: "var(--font-sans)", fontSize: "0.875rem", lineHeight: 1.5, wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
       {text}
     </div>
   );
 }
 
-function Composer({ value, setValue, onSend }: { value: string; setValue: (v: string) => void; onSend: () => void }) {
+/* ── DM message UI: header, list, rich bubble, reactions, replies ─────────── */
+const QUICK_EMOJI = ["👍", "❤️", "😂", "🎉", "😮", "😢"];
+
+function timeLabel(ms: number): string {
+  return new Date(ms).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+function dayLabel(ms: number): string {
+  const d = new Date(ms);
+  const today = new Date();
+  const yest = new Date(); yest.setDate(today.getDate() - 1);
+  const same = (a: Date, b: Date) => a.toDateString() === b.toDateString();
+  if (same(d, today)) return "Today";
+  if (same(d, yest)) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+/** Chat header: who you're talking with + a read-receipts toggle. */
+function ChatHeader({ peer, title, receipts, onToggleReceipts }: { peer?: string; title?: string; receipts: boolean; onToggleReceipts: () => void }) {
   return (
-    <div style={{ borderTop: "1px solid var(--color-border)", padding: "0.7rem", display: "flex", gap: "0.5rem" }}>
-      <input value={value} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => e.key === "Enter" && onSend()} placeholder="Message…" style={{ ...inputStyle, flex: 1 }} />
-      <button className="btn-primary" onClick={onSend} disabled={!value.trim()} style={{ opacity: value.trim() ? 1 : 0.5 }}>Send</button>
+    <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", padding: "0.6rem 0.95rem", borderBottom: "1px solid var(--color-border)" }}>
+      <span style={{ fontFamily: "var(--font-sans)", fontSize: "0.85rem", fontWeight: 700, color: "var(--color-ink)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {peer ? <AddressName address={peer} avatar /> : (title ?? "Conversation")}
+      </span>
+      <button
+        onClick={onToggleReceipts}
+        title={receipts ? "Read receipts on — peers can see when you've read their messages. Click to turn off." : "Read receipts off. Click to turn on."}
+        style={{ ...linkBtn, marginLeft: "auto", fontSize: "0.7rem", color: receipts ? "var(--color-primary-hover)" : "var(--color-ink-dim)", flexShrink: 0 }}
+      >
+        {receipts ? "✓✓" : "✓"} Receipts {receipts ? "on" : "off"}
+      </button>
+    </div>
+  );
+}
+
+function DayDivider({ label }: { label: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", margin: "0.7rem 0 0.4rem" }}>
+      <span style={{ flex: 1, height: 1, background: "var(--color-border-light)" }} />
+      <span style={{ fontFamily: "var(--font-sans)", fontSize: "0.64rem", fontWeight: 600, color: "var(--color-ink-dim)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</span>
+      <span style={{ flex: 1, height: 1, background: "var(--color-border-light)" }} />
+    </div>
+  );
+}
+
+function DmMessageList({ messages, onReact, onReply, onRetry }: {
+  messages: ChatMessage[];
+  onReact: (id: string, inbox: string, emoji: string) => void;
+  onReply: (m: ChatMessage) => void;
+  onRetry: (id: string) => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  const lastCount = useRef(0);
+  // Stick to the bottom when new messages arrive and the user is already near it.
+  useEffect(() => {
+    const c = containerRef.current;
+    const grew = messages.length > lastCount.current;
+    lastCount.current = messages.length;
+    if (!c) return;
+    const nearBottom = c.scrollHeight - c.scrollTop - c.clientHeight < 160;
+    if (grew && nearBottom) endRef.current?.scrollIntoView({ block: "end" });
+  }, [messages.length]);
+  useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, []);
+
+  if (messages.length === 0) {
+    return <div style={{ flex: 1, display: "flex", padding: "1rem" }}><p style={{ ...dim, margin: "auto" }}>No messages yet — say hello.</p></div>;
+  }
+  let lastDay = "";
+  return (
+    <div ref={containerRef} style={{ flex: 1, overflowY: "auto", padding: "1rem", display: "flex", flexDirection: "column", gap: "0.1rem" }}>
+      {messages.map((m) => {
+        const day = dayLabel(m.sentAtMs);
+        const showDay = day !== lastDay;
+        lastDay = day;
+        return (
+          <div key={m.id}>
+            {showDay && <DayDivider label={day} />}
+            <DmBubble m={m} onReact={onReact} onReply={onReply} onRetry={onRetry} />
+          </div>
+        );
+      })}
+      <div ref={endRef} />
+    </div>
+  );
+}
+
+function DmBubble({ m, onReact, onReply, onRetry }: {
+  m: ChatMessage;
+  onReact: (id: string, inbox: string, emoji: string) => void;
+  onReply: (m: ChatMessage) => void;
+  onRetry: (id: string) => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const align = m.mine ? "flex-end" : "flex-start";
+  const pending = m.id.startsWith("pending-");
+  return (
+    <div
+      id={`msg-${m.id}`}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => { setHover(false); setPickerOpen(false); }}
+      style={{ display: "flex", flexDirection: "column", alignItems: align, gap: "0.12rem", padding: "0.12rem 0" }}
+    >
+      {m.replyTo && <QuotedPreview r={m.replyTo} mine={m.mine} />}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.35rem", flexDirection: m.mine ? "row-reverse" : "row", maxWidth: "92%" }}>
+        <Bubble mine={m.mine} text={m.text} />
+        {(hover || pickerOpen) && !pending && (
+          <span style={{ display: "inline-flex", gap: "0.15rem", flexShrink: 0, position: "relative" }}>
+            <IconBtn title="React" onClick={() => setPickerOpen((v) => !v)}>☺</IconBtn>
+            <IconBtn title="Reply" onClick={() => onReply(m)}>↩</IconBtn>
+            {pickerOpen && (
+              <div style={{ position: "absolute", bottom: "100%", [m.mine ? "right" : "left"]: 0, marginBottom: 4, display: "flex", gap: "0.1rem", background: "#fff", border: "1px solid var(--color-border)", borderRadius: "999px", padding: "0.2rem 0.35rem", boxShadow: "0 4px 14px rgba(0,0,0,0.12)", zIndex: 5 } as React.CSSProperties}>
+                {QUICK_EMOJI.map((e) => (
+                  <button key={e} onClick={() => { onReact(m.id, m.senderInboxId, e); setPickerOpen(false); }} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "1rem", lineHeight: 1, padding: "0.1rem" }}>{e}</button>
+                ))}
+              </div>
+            )}
+          </span>
+        )}
+      </div>
+      {m.reactions.length > 0 && (
+        <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap", alignSelf: align, marginTop: "0.1rem" }}>
+          {m.reactions.map((r) => (
+            <button
+              key={r.emoji}
+              onClick={() => onReact(m.id, m.senderInboxId, r.emoji)}
+              title={r.mine ? "Remove your reaction" : "React"}
+              style={{ display: "inline-flex", alignItems: "center", gap: "0.2rem", fontSize: "0.72rem", padding: "0.05rem 0.4rem", borderRadius: "999px", cursor: "pointer", border: `1px solid ${r.mine ? "var(--color-primary)" : "var(--color-border)"}`, background: r.mine ? "rgba(247,147,26,0.12)" : "#fff", color: "var(--color-ink)" }}
+            >
+              <span>{r.emoji}</span>{r.count > 1 && <span style={{ color: "var(--color-ink-muted)" }}>{r.count}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: "0.3rem", alignSelf: align, fontSize: "0.62rem", color: "var(--color-ink-dim)", padding: "0 0.15rem" }}>
+        <span>{timeLabel(m.sentAtMs)}</span>
+        {m.mine && m.status === "sending" && <span>· Sending…</span>}
+        {m.mine && m.status === "failed" && (
+          <button onClick={() => onRetry(m.id)} style={{ ...linkBtn, fontSize: "0.62rem", color: "#9a2a2a" }}>· Failed · Retry</button>
+        )}
+        {m.mine && m.status === "sent" && (
+          <span title={m.readByPeer ? "Read" : "Sent"} style={{ color: m.readByPeer ? "var(--color-primary-hover)" : "var(--color-ink-dim)" }}>{m.readByPeer ? "✓✓" : "✓"}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The quoted parent shown above a reply bubble; click scrolls to the original. */
+function QuotedPreview({ r, mine }: { r: ReplyRef; mine: boolean }) {
+  return (
+    <button
+      onClick={() => document.getElementById(`msg-${r.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
+      style={{ alignSelf: mine ? "flex-end" : "flex-start", maxWidth: "80%", textAlign: "left", border: "none", background: "none", cursor: "pointer", padding: "0.1rem 0.5rem", borderLeft: "2px solid var(--color-primary)" }}
+    >
+      <span style={{ display: "block", fontSize: "0.64rem", fontWeight: 700, color: "var(--color-primary-hover)" }}>{r.mine ? "You" : "In reply to"}</span>
+      <span style={{ display: "block", fontSize: "0.72rem", color: "var(--color-ink-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "260px" }}>{r.text}</span>
+    </button>
+  );
+}
+
+/** The "replying to…" banner above the composer. */
+function ReplyBanner({ m, onCancel }: { m: ChatMessage; onCancel: () => void }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.5rem 0.7rem", borderBottom: "1px solid var(--color-border-light)", background: "var(--color-bg-subtle)" }}>
+      <span style={{ width: 3, alignSelf: "stretch", background: "var(--color-primary)", borderRadius: 2 }} />
+      <span style={{ minWidth: 0, flex: 1 }}>
+        <span style={{ display: "block", fontSize: "0.66rem", fontWeight: 700, color: "var(--color-primary-hover)" }}>Replying to {m.mine ? "yourself" : "message"}</span>
+        <span style={{ display: "block", fontSize: "0.74rem", color: "var(--color-ink-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.text}</span>
+      </span>
+      <button onClick={onCancel} title="Cancel reply" style={{ ...linkBtn, fontSize: "0.9rem", color: "var(--color-ink-dim)", flexShrink: 0 }}>✕</button>
+    </div>
+  );
+}
+
+/** An inbound message request — accept (allow) or decline (deny consent). */
+function RequestRow({ c, onOpen, onAccept, onDecline }: { c: ConvSummary; onOpen: () => void; onAccept: () => void; onDecline: () => void }) {
+  return (
+    <div style={{ padding: "0.5rem 0.85rem", borderBottom: "1px solid var(--color-border-light)", display: "flex", flexDirection: "column", gap: "0.3rem" }}>
+      <button onClick={onOpen} style={{ textAlign: "left", border: "none", background: "none", cursor: "pointer", padding: 0, minWidth: 0 }}>
+        <span style={{ display: "block", fontSize: "0.82rem", fontWeight: 600, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {c.peerAddress ? <AddressName address={c.peerAddress} /> : c.title}
+        </span>
+        {c.lastText && <span style={{ display: "block", fontSize: "0.7rem", color: "var(--color-ink-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.lastText}</span>}
+      </button>
+      <div style={{ display: "flex", gap: "0.3rem" }}>
+        <button onClick={onAccept} className="btn-primary" style={{ padding: "0.2rem 0.55rem", fontSize: "0.72rem" }}>Accept</button>
+        <button onClick={onDecline} style={{ ...linkBtn, fontSize: "0.72rem", color: "#9a2a2a", border: "1px solid var(--color-border)", borderRadius: "2px", padding: "0.2rem 0.55rem" }}>Decline</button>
+      </div>
+    </div>
+  );
+}
+
+function IconBtn({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button title={title} onClick={onClick} style={{ width: 22, height: 22, display: "inline-flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--color-border)", background: "#fff", borderRadius: "999px", cursor: "pointer", fontSize: "0.8rem", color: "var(--color-ink-muted)", lineHeight: 1, padding: 0 }}>{children}</button>
+  );
+}
+
+function Composer({ value, setValue, onSend, header }: { value: string; setValue: (v: string) => void; onSend: () => void; header?: React.ReactNode }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  // Auto-grow the textarea with content, up to a cap.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [value]);
+  return (
+    <div style={{ borderTop: "1px solid var(--color-border)" }}>
+      {header}
+      <div style={{ padding: "0.7rem", display: "flex", gap: "0.5rem", alignItems: "flex-end" }}>
+        <textarea
+          ref={ref}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); } }}
+          placeholder="Message…  (Shift+Enter for a new line)"
+          rows={1}
+          style={{ ...inputStyle, flex: 1, resize: "none", lineHeight: 1.5, maxHeight: "120px" }}
+        />
+        <button className="btn-primary" onClick={onSend} disabled={!value.trim()} style={{ opacity: value.trim() ? 1 : 0.5 }}>Send</button>
+      </div>
     </div>
   );
 }
