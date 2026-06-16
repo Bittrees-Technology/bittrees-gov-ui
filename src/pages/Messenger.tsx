@@ -611,66 +611,96 @@ function ReceiptsControl({ convId }: { convId: string }) {
 
 /** ENS lookup tool for Settings: resolve a name↔address, check availability + price,
  *  and hand off the actual registration to the audited ENS app. */
+/** Result of a live ENS lookup (address reverse-resolve, or name → registered/available). */
+type EnsLookup =
+  | { kind: "address"; address: string; name: string | null }
+  | { kind: "registered"; name: string; address: string }
+  | { kind: "available"; name: string; priceEth: string }
+  | { kind: "unavailable"; name: string }
+  | { kind: "error" };
+
+/** Worth a live lookup? A full 0x address, or an ENS label of ≥3 chars (skip short fragments). */
+function ensLookupable(raw: string): boolean {
+  const v = raw.trim();
+  if (!v) return false;
+  if (isAddress(v)) return true;
+  const label = v.toLowerCase().replace(/\.eth$/, "");
+  return label.length >= 3 && !/\s/.test(label);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function ensLookup(client: any, raw: string): Promise<EnsLookup> {
+  const v = raw.trim();
+  try {
+    if (isAddress(v)) {
+      const name = await client.getEnsName({ address: getAddress(v) }).catch(() => null);
+      return { kind: "address", address: getAddress(v), name: name ?? null };
+    }
+    const name = v.toLowerCase().endsWith(".eth") ? v.toLowerCase() : `${v.toLowerCase()}.eth`;
+    const normalized = normalize(name); // throws on an invalid name → caught below
+    const addr = await client.getEnsAddress({ name: normalized }).catch(() => null);
+    if (addr) return { kind: "registered", name, address: getAddress(addr) };
+    const label = ensLabel(name);
+    const avail = await ensAvailable(client, label);
+    if (avail) {
+      const wei = await ensYearPriceWei(client, label).catch(() => 0n);
+      return { kind: "available", name, priceEth: Number(formatEther(wei)).toFixed(4) };
+    }
+    return { kind: "unavailable", name };
+  } catch {
+    return { kind: "error" };
+  }
+}
+
+/** Debounce a value by `ms` — so live lookups fire after the user pauses, not per keystroke. */
+function useDebounced<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value);
+  useEffect(() => { const t = setTimeout(() => setV(value), ms); return () => clearTimeout(t); }, [value, ms]);
+  return v;
+}
+
 function EnsTool({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
   const client = usePublicClient({ chainId: mainnet.id });
   const [q, setQ] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [out, setOut] = useState<React.ReactNode>();
-  const [foundAddr, setFoundAddr] = useState<string>(); // a resolved address → can chat / save
   const [actMsg, setActMsg] = useState<string>();
   const shorten = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-  async function lookup() {
-    const v = q.trim();
-    if (!v || !client) return;
-    setBusy(true);
-    setOut(undefined);
-    setFoundAddr(undefined);
-    setActMsg(undefined);
-    try {
-      if (isAddress(v)) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const name = await (client as any).getEnsName({ address: getAddress(v) });
-        setOut(name ? <>Primary name: <strong>{name}</strong></> : "No primary ENS name set for this address.");
-        setFoundAddr(getAddress(v));
-      } else {
-        const name = v.toLowerCase().endsWith(".eth") ? v.toLowerCase() : `${v.toLowerCase()}.eth`;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const addr = await (client as any).getEnsAddress({ name: normalize(name) }).catch(() => null);
-        if (addr) {
-          setOut(<><strong>{name}</strong> → {shorten(addr)} · already registered</>);
-          setFoundAddr(getAddress(addr));
-        } else {
-          const label = ensLabel(name);
-          const avail = await ensAvailable(client, label).catch(() => null);
-          if (avail) {
-            const wei = await ensYearPriceWei(client, label).catch(() => 0n);
-            setOut(
-              <>
-                <strong>{name}</strong> is available — ~{Number(formatEther(wei)).toFixed(4)} ETH/yr.{" "}
-                <a href={ensAppUrl(name)} target="_blank" rel="noreferrer" style={{ color: "var(--color-primary-hover)", fontWeight: 600 }}>Register on ENS ↗</a>
-              </>
-            );
-          } else {
-            setOut(`${name} isn't available to register (or isn't a 2nd-level .eth name).`);
-          }
-        }
-      }
-    } catch {
-      setOut("Lookup failed — check the name/address and try again.");
-    } finally {
-      setBusy(false);
-    }
-  }
+  // Live lookup: debounce the input, then resolve/availability-check as a cached query
+  // keyed on the debounced term (so only the latest term's result shows — no races).
+  const debouncedQ = useDebounced(q.trim(), 450);
+  const active = !!client && ensLookupable(debouncedQ);
+  const lookupQ = useQuery({
+    queryKey: ["ens-tool", debouncedQ],
+    enabled: active,
+    staleTime: 60_000,
+    queryFn: () => ensLookup(client, debouncedQ),
+  });
+  const r = active ? lookupQ.data : undefined;
+  const checking = active && lookupQ.isFetching;
+  const foundAddr = r?.kind === "address" || r?.kind === "registered" ? r.address : undefined;
 
   return (
     <div>
       <p className="text-label" style={{ marginBottom: "0.4rem" }}>ENS</p>
-      <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-        <input value={q} onChange={(e) => { setQ(e.target.value); setOut(undefined); setFoundAddr(undefined); setActMsg(undefined); }} onKeyDown={(e) => e.key === "Enter" && lookup()} placeholder="name.eth or 0x address" style={{ ...inputStyle, flex: 1, minWidth: "170px" }} />
-        <button className="btn-primary" onClick={lookup} disabled={busy || !q.trim()} style={{ padding: "0.4rem 0.8rem", fontSize: "0.82rem", opacity: busy || !q.trim() ? 0.6 : 1 }}>{busy ? "…" : "Look up"}</button>
-      </div>
-      {out && <p style={{ ...dim, marginTop: "0.5rem", lineHeight: 1.55, color: "var(--color-ink-muted)" }}>{out}</p>}
+      <input value={q} onChange={(e) => { setQ(e.target.value); setActMsg(undefined); }} placeholder="name.eth or 0x address" style={{ ...inputStyle, width: "100%" }} />
+      {checking ? (
+        <p style={{ ...dim, marginTop: "0.5rem" }}>Checking…</p>
+      ) : r ? (
+        <p style={{ ...dim, marginTop: "0.5rem", lineHeight: 1.55, color: "var(--color-ink-muted)" }}>
+          {r.kind === "address" ? (
+            r.name ? <>Primary name: <strong>{r.name}</strong></> : "No primary ENS name set for this address."
+          ) : r.kind === "registered" ? (
+            <><strong>{r.name}</strong> → {shorten(r.address)} · already registered</>
+          ) : r.kind === "available" ? (
+            <><strong style={{ color: "var(--color-secondary)" }}>{r.name} is available</strong> — ~{r.priceEth} ETH/yr.{" "}
+              <a href={ensAppUrl(r.name)} target="_blank" rel="noreferrer" style={{ color: "var(--color-primary-hover)", fontWeight: 600 }}>Register on ENS ↗</a></>
+          ) : r.kind === "unavailable" ? (
+            <>{r.name} isn't available to register (or isn't a 2nd-level .eth name).</>
+          ) : (
+            "Couldn't check that — try again."
+          )}
+        </p>
+      ) : null}
       {foundAddr && (
         <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
           <button className="btn-primary" onClick={() => void xmtp.startDm(foundAddr)} style={{ padding: "0.35rem 0.75rem", fontSize: "0.8rem" }}>Start chat</button>
@@ -678,7 +708,7 @@ function EnsTool({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
         </div>
       )}
       {actMsg && <p style={{ ...dim, marginTop: "0.35rem" }}>{actMsg}</p>}
-      <p style={{ ...dim, marginTop: "0.35rem", fontSize: "0.72rem" }}>Resolve names &amp; addresses, check availability, and register via the official ENS app. If a wallet is on XMTP you can start a chat or save them here.</p>
+      <p style={{ ...dim, marginTop: "0.35rem", fontSize: "0.72rem" }}>Type a name to check availability live, or an address to reverse-resolve. Register via the official ENS app; if a wallet is on XMTP you can start a chat or save them here.</p>
     </div>
   );
 }
