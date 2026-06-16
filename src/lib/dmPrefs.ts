@@ -175,3 +175,12 @@ export function receiptsEnabledForConv(id: string): boolean {
   const override = prefsCache[id]?.readReceipts;
   return override === undefined ? settingsCache.readReceipts : override;
 }
+
+/* ── bulk accessors for cross-device sync ([[userSync]]) ── non-hook reads/writes
+   that update the caches + persist + notify, so the UI reflects a pulled remote. */
+export function getAllPrefs(): DmPrefs { return prefsCache; }
+export function replaceAllPrefs(p: DmPrefs) { prefsCache = p; persistPrefs(); }
+export function getSettingsSnapshot(): DmSettings { return settingsCache; }
+export function replaceSettings(s: DmSettings) { settingsCache = { ...settingsCache, ...s }; persistSettings(); }
+export function getBlockedList(): string[] { return blockCache; }
+export function replaceBlocked(list: string[]) { blockCache = [...new Set(list.map((x) => x.toLowerCase()))]; persistBlocked(); }

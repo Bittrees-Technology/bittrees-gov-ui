@@ -65,3 +65,11 @@ export function deleteSavedMessage(owner: string | undefined, id: string) {
   if (!owner) return;
   persist(owner, getCache(owner).filter((m) => m.id !== id));
 }
+
+/** Bulk read/replace for cross-device sync ([[userSync]]). Non-hook. */
+export function getNotes(owner: string | undefined): SavedMessage[] {
+  return owner ? getCache(owner) : [];
+}
+export function replaceNotes(owner: string | undefined, notes: SavedMessage[]) {
+  if (owner) persist(owner, notes);
+}

@@ -20,6 +20,7 @@ import {
 import { addContact } from "../lib/contacts";
 import { ensAvailable, ensYearPriceWei, ensLabel, ensAppUrl, ETH_REGISTRAR_CONTROLLER, REGISTRAR_WRITE_ABI, PUBLIC_RESOLVER, REGISTRATION_DURATION, ensRegisterData, ensMinCommitmentAge } from "../lib/ens";
 import { useSavedMessages, addSavedMessage, deleteSavedMessage } from "../lib/savedMessages";
+import { useUserSync, isSyncEnabled, enableSync, disableSync } from "../lib/userSync";
 import { useVotingPowerNow } from "../lib/snapshot";
 import {
   BGOV_ROOMS,
@@ -131,6 +132,7 @@ type ShellView = "search" | "contacts" | "chat" | "settings";
 
 function MessengerHome({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
   const { address } = useAccount();
+  useUserSync(address); // cross-device sync of Saved Messages + prefs (when enabled)
   const [view, setView] = useState<ShellView>("chat");
   const [openSaved, setOpenSaved] = useState(false);
   const [roomsOpen, setRoomsOpen] = useState(false);
@@ -484,6 +486,7 @@ function SettingsView({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
         on={settings.readReceipts}
         onToggle={() => setReadReceipts(!settings.readReceipts)}
       />
+      <SyncSection owner={xmtp.selfAddress} />
       <div>
         <p className="text-label" style={{ marginBottom: "0.4rem" }}>Blocked ({blocked.length})</p>
         {blocked.length === 0 ? (
@@ -500,8 +503,56 @@ function SettingsView({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
         )}
       </div>
       <p style={{ ...dim, lineHeight: 1.6, margin: 0 }}>
-        Direct messages are end-to-end encrypted over XMTP. Your profile picture is your ENS avatar; Saved Messages and these preferences are stored only on this device.
+        Direct messages are end-to-end encrypted over XMTP. Your profile picture is your ENS avatar. Saved Messages and these preferences live on this device — and sync across your devices (encrypted) when you turn on sync above.
       </p>
+    </div>
+  );
+}
+
+/** Opt-in cross-device sync: one signature derives an encryption key (cached + reused)
+ *  so Saved Messages + preferences encrypt to this wallet and follow it across devices. */
+function SyncSection({ owner }: { owner?: string }) {
+  const { data: walletClient } = useWalletClient();
+  const [, force] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string>();
+  const enabled = isSyncEnabled(owner);
+
+  async function turnOn() {
+    if (!walletClient || !owner) return;
+    setBusy(true); setErr(undefined);
+    try {
+      await enableSync(walletClient, owner as `0x${string}`);
+      force((n) => n + 1);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't enable sync");
+    } finally {
+      setBusy(false);
+    }
+  }
+  function turnOff() { if (owner) { disableSync(owner); force((n) => n + 1); } }
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem" }}>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ display: "block", fontFamily: "var(--font-sans)", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-ink)" }}>Sync across devices</span>
+          <span style={{ display: "block", fontFamily: "var(--font-sans)", fontSize: "0.78rem", color: "var(--color-ink-muted)", lineHeight: 1.5 }}>
+            {enabled
+              ? "On — your Saved Messages and preferences are encrypted to this wallet and synced. The same wallet on another device sees them after you enable sync there."
+              : "Off — stored only on this device. Turn on to encrypt them to your wallet and sync across devices (one signature, no gas)."}
+          </span>
+        </span>
+        {!owner ? (
+          <span style={{ ...dim, fontSize: "0.72rem", flexShrink: 0 }}>Connect</span>
+        ) : enabled ? (
+          <button onClick={turnOff} style={{ ...settingsBtn, flexShrink: 0 }}>Turn off</button>
+        ) : (
+          <button className="btn-primary" disabled={busy || !walletClient} onClick={turnOn} style={{ padding: "0.4rem 0.8rem", fontSize: "0.82rem", opacity: busy || !walletClient ? 0.6 : 1, flexShrink: 0 }}>{busy ? "Confirm in wallet…" : "Turn on"}</button>
+        )}
+      </div>
+      {enabled && <p style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", margin: "0.4rem 0 0", fontSize: "0.72rem" }}><strong style={{ color: "var(--color-secondary)" }}>✓ Syncing</strong> <span style={dim}>· encrypted to your wallet</span></p>}
+      {err && <p role="alert" style={{ ...dim, color: "var(--color-ink)", fontSize: "0.72rem", margin: "0.35rem 0 0" }}>{err}</p>}
     </div>
   );
 }
