@@ -186,6 +186,11 @@ export async function joinRoom(push: PushClient, chatId: string) {
   return push.chat.group.join(chatId);
 }
 
+/** Leave a room the wallet has joined (removes the caller from the Push group). */
+export async function leaveRoom(push: PushClient, chatId: string) {
+  return push.chat.group.leave(chatId);
+}
+
 /** Timestamp (ms) of a room's most recent message — for the unread flag. 0 if none. */
 export async function roomLatestTs(push: PushClient, chatId: string): Promise<number> {
   try {

@@ -26,6 +26,7 @@ import {
   BGOV_ROOMS,
   SAFE_ROOMS,
   joinRoom,
+  leaveRoom,
   roomHistory,
   roomHistoryOlder,
   sendRoom,
@@ -826,11 +827,13 @@ function CommunityGroups() {
   const canPropose = useCanProposeRoom(address);
 
   const push = usePush(); // shared, signature-persistent (survives tab switch + reload)
+  const qc = useQueryClient();
   const [error, setError] = useState<string>();
   const [openRoom, setOpenRoom] = useState<PushRoom | null>(null);
   const [messages, setMessages] = useState<PushMessage[]>([]);
   const [draft, setDraft] = useState("");
-  const [busyKey, setBusyKey] = useState<string>(); // which room is mid-join (per-room, not global)
+  const [busyKey, setBusyKey] = useState<string>(); // which room is mid-join/leave (per-room, not global)
+  const [menuKey, setMenuKey] = useState<string>(); // which joined room's options menu is open
   // Cursor for "Load older messages" (Push paginates 30 at a time); undefined = no more.
   const [olderCursor, setOlderCursor] = useState<string>();
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -849,6 +852,51 @@ function CommunityGroups() {
   const joinedMap = joinedQ.data ?? {};
   const isJoined = (r: PushRoom) => !!r.chatId && r.chatId in joinedMap;
   const roomUnread = (r: PushRoom) => isJoined(r) && (joinedMap[r.chatId!] ?? 0) > (prefs[`room:${r.key}`]?.lastReadAt ?? 0);
+
+  // Joined rooms pin to the top: pinned (manual order) first, then the rest alphabetically.
+  // Pin state + order are per-device, reusing the DM prefs store keyed by `room:<key>`.
+  const roomPrefId = (r: PushRoom) => `room:${r.key}`;
+  const joinedAll = allRooms.filter(isJoined);
+  const pinnedJoined = joinedAll
+    .filter((r) => prefs[roomPrefId(r)]?.pinned)
+    .sort((a, b) => (prefs[roomPrefId(a)]?.order ?? 0) - (prefs[roomPrefId(b)]?.order ?? 0));
+  const joinedRooms = [
+    ...pinnedJoined,
+    ...joinedAll.filter((r) => !prefs[roomPrefId(r)]?.pinned).sort((a, b) => a.name.localeCompare(b.name)),
+  ];
+  const otherRooms = allRooms.filter((r) => !isJoined(r)).sort((a, b) => a.name.localeCompare(b.name));
+
+  function moveRoom(prefId: string, dir: "up" | "down") {
+    const ids = pinnedJoined.map(roomPrefId);
+    const i = ids.indexOf(prefId);
+    const j = dir === "up" ? i - 1 : i + 1;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    setPinnedOrder(ids);
+  }
+
+  async function leave(room: PushRoom) {
+    if (!room.chatId || !push.client) return;
+    if (!confirm(`Leave ${room.name}? You can re-join anytime you still qualify.`)) return;
+    setMenuKey(undefined);
+    setBusyKey(room.key);
+    setError(undefined);
+    try {
+      await leaveRoom(push.client, room.chatId);
+      if (openRoom?.key === room.key) { setOpenRoom(null); setMessages([]); setOlderCursor(undefined); }
+      // Optimistically drop it from the joined map so the button flips to Join at once,
+      // then refetch to reconcile with Push.
+      qc.setQueryData<Record<string, number>>(["joined-chats", liveChatIds], (old) => {
+        if (!old || !room.chatId) return old;
+        const next = { ...old }; delete next[room.chatId]; return next;
+      });
+      qc.invalidateQueries({ queryKey: ["joined-chats"] });
+    } catch (e) {
+      setError(humanError(e));
+    } finally {
+      setBusyKey(undefined);
+    }
+  }
 
   // Scroll the open room to the newest message on open + on send (not when older
   // history is prepended), so new messages read from the bottom up.
@@ -870,6 +918,7 @@ function CommunityGroups() {
       setOlderCursor(page.cursor);
       markRead(`room:${room.key}`, Date.now()); // clear this room's unread flag
       scrollRoomRef.current = true; // jump to newest on open
+      qc.invalidateQueries({ queryKey: ["joined-chats"] }); // reflect new membership in the list
     } catch (e) {
       setError(humanError(e));
     } finally {
@@ -964,9 +1013,6 @@ function CommunityGroups() {
     );
   }
 
-  const joinedRooms = allRooms.filter(isJoined).sort((a, b) => a.name.localeCompare(b.name));
-  const otherRooms = allRooms.filter((r) => !isJoined(r)).sort((a, b) => a.name.localeCompare(b.name));
-
   return (
     <div className="card msg-shell" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <div style={{ padding: "0.6rem 0.85rem", borderBottom: "1px solid var(--color-border)" }}>
@@ -978,9 +1024,30 @@ function CommunityGroups() {
         {joinedRooms.length > 0 && (
           <>
             <p className="text-label" style={{ margin: 0, padding: "0.55rem 0.85rem 0.3rem" }}>Joined</p>
-            {joinedRooms.map((room) => (
-              <RoomRow key={room.key} room={room} joined unread={roomUnread(room)} busy={busyKey === room.key} onOpen={() => open(room)} />
-            ))}
+            {joinedRooms.map((room) => {
+              const pid = roomPrefId(room);
+              const pinned = !!prefs[pid]?.pinned;
+              const pinIdx = pinned ? pinnedJoined.findIndex((r) => r.key === room.key) : -1;
+              return (
+                <RoomRow
+                  key={room.key}
+                  room={room}
+                  joined
+                  pinned={pinned}
+                  unread={roomUnread(room)}
+                  busy={busyKey === room.key}
+                  menuOpen={menuKey === room.key}
+                  onOpen={() => { setMenuKey(undefined); open(room); }}
+                  onMenu={() => setMenuKey((m) => (m === room.key ? undefined : room.key))}
+                  onPin={() => togglePin(pid)}
+                  onLeave={() => leave(room)}
+                  canUp={pinIdx > 0}
+                  canDown={pinIdx >= 0 && pinIdx < pinnedJoined.length - 1}
+                  onUp={() => moveRoom(pid, "up")}
+                  onDown={() => moveRoom(pid, "down")}
+                />
+              );
+            })}
           </>
         )}
         {otherRooms.length > 0 && (
@@ -1017,23 +1084,55 @@ function RoomAvatar({ icon, size = 34 }: { icon?: string; size?: number }) {
   );
 }
 
-/** A community-room row (chat-list style): avatar · name · blurb · unread dot · Join/Open. */
-function RoomRow({ room, joined, unread, busy, onOpen }: { room: PushRoom; joined: boolean; unread: boolean; busy: boolean; onOpen: () => void }) {
+/** A community-room row (chat-list style): avatar · name · blurb · unread dot · Join/Open.
+ *  Joined rooms also get a ⋯ menu to pin/reorder (manual order) or leave the room. */
+function RoomRow({ room, joined, unread, busy, onOpen, pinned = false, menuOpen = false, onMenu, onPin, onLeave, canUp, canDown, onUp, onDown }: {
+  room: PushRoom;
+  joined: boolean;
+  unread: boolean;
+  busy: boolean;
+  onOpen: () => void;
+  pinned?: boolean;
+  menuOpen?: boolean;
+  onMenu?: () => void;
+  onPin?: () => void;
+  onLeave?: () => void;
+  canUp?: boolean;
+  canDown?: boolean;
+  onUp?: () => void;
+  onDown?: () => void;
+}) {
   const live = !!room.chatId;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", padding: "0.55rem 0.85rem", borderBottom: "1px solid var(--color-border)" }}>
-      <RoomAvatar icon={room.icon} />
-      <span style={{ minWidth: 0, flex: 1 }}>
-        <span style={{ display: "flex", alignItems: "center", gap: "0.35rem", minWidth: 0 }}>
-          {unread && <span aria-label="unread" title="Unread messages" style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--color-primary)", flexShrink: 0 }} />}
-          <span style={{ fontSize: "0.85rem", fontWeight: unread ? 700 : 600, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{room.name}</span>
+    <div style={{ borderBottom: "1px solid var(--color-border)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", padding: "0.55rem 0.85rem" }}>
+        <RoomAvatar icon={room.icon} />
+        <span style={{ minWidth: 0, flex: 1 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: "0.35rem", minWidth: 0 }}>
+            {unread && <span aria-label="unread" title="Unread messages" style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--color-primary)", flexShrink: 0 }} />}
+            <span style={{ fontSize: "0.85rem", fontWeight: unread ? 700 : 600, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{room.name}</span>
+            {pinned && <span title="Pinned" aria-hidden style={{ flexShrink: 0, fontSize: "0.66rem", color: "var(--color-ink-dim)" }}>📌</span>}
+          </span>
+          <span style={{ display: "block", fontSize: "0.72rem", color: "var(--color-ink-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{room.blurb}</span>
         </span>
-        <span style={{ display: "block", fontSize: "0.72rem", color: "var(--color-ink-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{room.blurb}</span>
-      </span>
-      {!live ? (
-        <span style={{ ...dim, fontSize: "0.72rem", flexShrink: 0 }}>Coming soon</span>
-      ) : (
-        <button className="btn-primary" disabled={busy} onClick={onOpen} style={{ padding: "0.3rem 0.8rem", fontSize: "0.78rem", opacity: busy ? 0.6 : 1, flexShrink: 0 }}>{busy ? "…" : joined ? "Open" : "Join"}</button>
+        {!live ? (
+          <span style={{ ...dim, fontSize: "0.72rem", flexShrink: 0 }}>Coming soon</span>
+        ) : (
+          <>
+            <button className="btn-primary" disabled={busy} onClick={onOpen} style={{ padding: "0.3rem 0.8rem", fontSize: "0.78rem", opacity: busy ? 0.6 : 1, flexShrink: 0 }}>{busy ? "…" : joined ? "Open" : "Join"}</button>
+            {joined && (
+              <button onClick={onMenu} aria-label="Room options" title="Options" style={{ border: "none", background: "none", cursor: "pointer", padding: "0 0.3rem", color: menuOpen ? "var(--color-ink)" : "var(--color-ink-dim)", fontSize: "1.1rem", lineHeight: 1, flexShrink: 0 }}>⋯</button>
+            )}
+          </>
+        )}
+      </div>
+      {joined && live && menuOpen && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem", padding: "0 0.85rem 0.55rem 3.3rem" }}>
+          <RowAction onClick={onPin}>{pinned ? "Unpin" : "Pin"}</RowAction>
+          {pinned && <RowAction onClick={onUp} disabled={!canUp}>↑</RowAction>}
+          {pinned && <RowAction onClick={onDown} disabled={!canDown}>↓</RowAction>}
+          <RowAction onClick={onLeave} danger>Leave room</RowAction>
+        </div>
       )}
     </div>
   );
