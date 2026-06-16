@@ -489,8 +489,8 @@ function SettingsView({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
 /** Your messenger profile: avatar (local override, else your ENS avatar) + identity. */
 function ProfileSection({ owner }: { owner?: string }) {
   const local = useProfileAvatar(owner);
-  const { data: ensName } = useEnsName({ address: owner as `0x${string}` | undefined, chainId: mainnet.id });
-  const { data: ensAvatar } = useEnsAvatar({ name: ensName ? normalize(ensName) : undefined, chainId: mainnet.id });
+  const { data: ensName, isLoading: ensNameLoading } = useEnsName({ address: owner as `0x${string}` | undefined, chainId: mainnet.id });
+  const { data: ensAvatar, isLoading: ensAvatarLoading } = useEnsAvatar({ name: ensName ? normalize(ensName) : undefined, chainId: mainnet.id });
   const avatar = local || ensAvatar || null;
   const fileRef = useRef<HTMLInputElement>(null);
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -524,9 +524,42 @@ function ProfileSection({ owner }: { owner?: string }) {
           </div>
         </div>
       </div>
-      <p style={{ ...dim, fontSize: "0.72rem", marginTop: "0.45rem", lineHeight: 1.5 }}>
-        Stored on this device. {ensAvatar && !local ? "Currently showing your ENS avatar — set on ENS to make it visible to others." : "Your ENS avatar is the picture other apps see."}
+      <p style={{ ...dim, fontSize: "0.72rem", marginTop: "0.45rem", lineHeight: 1.5, margin: "0.45rem 0 0" }}>
+        Stored on this device — the picture you see here.
       </p>
+      {owner && (
+        <div style={{ marginTop: "0.7rem", paddingTop: "0.7rem", borderTop: "1px solid var(--color-border)" }}>
+          <p className="text-label" style={{ marginBottom: "0.4rem" }}>ENS avatar</p>
+          {ensNameLoading ? (
+            <p style={{ ...dim, fontSize: "0.72rem", margin: 0 }}>Checking ENS…</p>
+          ) : !ensName ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.6rem", flexWrap: "wrap" }}>
+              <span style={{ ...dim, fontSize: "0.72rem", lineHeight: 1.4, minWidth: 0, flex: 1 }}>
+                No primary ENS name yet — you need one to set a cross-app avatar.
+              </span>
+              <a href={ensAppUrl("")} target="_blank" rel="noreferrer" style={{ ...settingsBtn, textDecoration: "none", whiteSpace: "nowrap" }}>Get an ENS name ↗</a>
+            </div>
+          ) : (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.6rem", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "0.72rem", lineHeight: 1.4, minWidth: 0, flex: 1 }}>
+                {ensAvatarLoading ? (
+                  <span style={dim}>Checking {ensName}…</span>
+                ) : ensAvatar ? (
+                  <span style={dim}><strong style={{ color: "var(--color-secondary)" }}>✓ Synced to ENS</strong> — {ensName} has an avatar set.</span>
+                ) : (
+                  <span style={dim}>Not on ENS yet — {ensName} has no avatar.</span>
+                )}
+              </span>
+              <a href={ensAppUrl(ensName)} target="_blank" rel="noreferrer" style={{ ...settingsBtn, textDecoration: "none", whiteSpace: "nowrap" }}>
+                {ensAvatar ? "Update on ENS ↗" : "Sync to ENS ↗"}
+              </a>
+            </div>
+          )}
+          <p style={{ ...dim, fontSize: "0.68rem", lineHeight: 1.5, margin: "0.4rem 0 0" }}>
+            Opens the ENS app, where you can upload this picture as your avatar — ENS pins it to IPFS so it shows across every app. (On-chain avatar records can't hold a full image, so the upload happens in the ENS app.)
+          </p>
+        </div>
+      )}
     </div>
   );
 }
