@@ -558,7 +558,7 @@ function ProfileSection({ owner }: { owner?: string }) {
             )}
           </p>
           <p style={{ ...dim, fontSize: "0.68rem", lineHeight: 1.5, margin: "0.35rem 0 0" }}>
-            Your picture is your ENS avatar. Upload picture opens the ENS app's edit-profile flow, where you add the image — ENS uploads it, pins it to IPFS, and writes it to your name in one transaction, so it shows everywhere. (A full image can't live in an on-chain record, so the upload happens in the ENS app.)
+            Your picture is your ENS avatar — add it in the ENS app and it shows across every app.
           </p>
         </>
       ))}
