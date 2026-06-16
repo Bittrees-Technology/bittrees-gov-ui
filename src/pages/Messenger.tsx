@@ -557,9 +557,11 @@ function ProfileSection({ owner }: { owner?: string }) {
               <span style={dim}>No picture yet — Upload picture opens the ENS app to add your avatar to {ensName}.</span>
             )}
           </p>
-          <p style={{ ...dim, fontSize: "0.68rem", lineHeight: 1.5, margin: "0.35rem 0 0" }}>
-            Your picture is your ENS avatar — add it in the ENS app and it shows across every app.
-          </p>
+          {!ensAvatarLoading && !ensAvatar && (
+            <p style={{ ...dim, fontSize: "0.68rem", lineHeight: 1.5, margin: "0.35rem 0 0" }}>
+              Your picture is your ENS avatar — add it in the ENS app and it shows across every app.
+            </p>
+          )}
         </>
       ))}
     </div>
