@@ -42,6 +42,7 @@ export function RoomGateBuilder({ gate, roleOptions }: { gate: ReturnType<typeof
             <option value="ens">ENS name</option>
             <option value="erc20">Token (ERC-20)</option>
             <option value="erc721">NFT (ERC-721)</option>
+            <option value="erc1155">Multi-token (ERC-1155)</option>
           </select>
           {r.type === "role" && (
             <select value={r.role} onChange={(e) => setRule(i, { role: e.target.value })} style={{ ...inputStyle, width: "auto", minWidth: "160px" }}>
@@ -58,13 +59,13 @@ export function RoomGateBuilder({ gate, roleOptions }: { gate: ReturnType<typeof
           {r.type === "ens" && (
             <input value={r.ens} onChange={(e) => setRule(i, { ens: e.target.value })} placeholder="name.eth — or blank for any ENS name" style={{ ...inputStyle, flex: 1, minWidth: "200px" }} />
           )}
-          {(r.type === "erc20" || r.type === "erc721") && (
+          {(r.type === "erc20" || r.type === "erc721" || r.type === "erc1155") && (
             <>
               <input value={r.token} onChange={(e) => setRule(i, { token: e.target.value })} placeholder="Token 0x address" style={{ ...inputStyle, flex: 1, minWidth: "160px", fontFamily: "var(--font-mono)", fontSize: "0.8rem" }} />
-              <input value={r.min} onChange={(e) => setRule(i, { min: e.target.value })} placeholder={r.type === "erc20" ? "Min amount" : "Min count"} style={{ ...inputStyle, width: "100px" }} />
-              {r.type === "erc20" && (
-                <input value={r.decimals} onChange={(e) => setRule(i, { decimals: e.target.value })} type="number" min={0} title="Token decimals" placeholder="Dec" style={{ ...inputStyle, width: "80px" }} />
+              {r.type === "erc1155" && (
+                <input value={r.tokenId} onChange={(e) => setRule(i, { tokenId: e.target.value })} title="ERC-1155 token ID — leave blank for #0" placeholder="Token ID (blank = #0)" style={{ ...inputStyle, width: "140px" }} />
               )}
+              <input value={r.min} onChange={(e) => setRule(i, { min: e.target.value })} placeholder={r.type === "erc20" ? "Min amount" : "Min count"} style={{ ...inputStyle, width: "100px" }} />
             </>
           )}
           {rules.length > 1 && (

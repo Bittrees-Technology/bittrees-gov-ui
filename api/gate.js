@@ -1,4 +1,4 @@
-import { createPublicClient, http, getAddress } from "viem";
+import { createPublicClient, http, getAddress, parseUnits } from "viem";
 import { mainnet } from "viem/chains";
 import { normalize } from "viem/ens";
 
@@ -120,6 +120,30 @@ async function tokenBalance(token, user) {
   }
 }
 
+const ERC20_DECIMALS_ABI = [
+  { name: "decimals", type: "function", stateMutability: "view", inputs: [], outputs: [{ type: "uint8" }] },
+];
+// Read an ERC-20's decimals on-chain (so the room's `min` can be a human amount); 18 on failure.
+async function tokenDecimals(token) {
+  try {
+    return Number(await client.readContract({ address: token, abi: ERC20_DECIMALS_ABI, functionName: "decimals" }));
+  } catch {
+    return 18;
+  }
+}
+
+const ERC1155_BAL_ABI = [
+  { name: "balanceOf", type: "function", stateMutability: "view", inputs: [{ type: "address" }, { type: "uint256" }], outputs: [{ type: "uint256" }] },
+];
+// ERC-1155 balanceOf(account, id) → the holder's balance of one token id.
+async function tokenBalance1155(token, user, id) {
+  try {
+    return await client.readContract({ address: token, abi: ERC1155_BAL_ABI, functionName: "balanceOf", args: [user, id] });
+  } catch {
+    return 0n;
+  }
+}
+
 const isAddr = (s) => /^0x[a-fA-F0-9]{40}$/.test(s);
 
 /** Decode a base64url gate object from the URL. */
@@ -151,8 +175,20 @@ async function evalRule(rule, user, roles) {
     }
     if (rule.kind === "token") {
       if (!isAddr(rule.token)) return false;
-      let min; try { min = BigInt(rule.min); } catch { min = 1n; }
-      return (await tokenBalance(getAddress(rule.token), user)) >= min;
+      const token = getAddress(rule.token);
+      if (rule.standard === "erc1155") {
+        let id; try { id = BigInt(rule.tokenId ?? "0"); } catch { id = 0n; }
+        let min; try { min = BigInt(rule.min || "1"); } catch { min = 1n; }
+        return (await tokenBalance1155(token, user, id)) >= min;
+      }
+      if (rule.standard === "erc20") {
+        // `min` is a human amount → scale by the token's on-chain decimals.
+        let min; try { min = parseUnits(String(rule.min || "0"), await tokenDecimals(token)); } catch { min = 0n; }
+        return (await tokenBalance(token, user)) >= min;
+      }
+      // erc721 (or legacy) → `min` is a raw token count.
+      let min; try { min = BigInt(rule.min || "1"); } catch { min = 1n; }
+      return (await tokenBalance(token, user)) >= min;
     }
     if (rule.kind === "ens") {
       if (rule.name) {

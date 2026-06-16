@@ -24,7 +24,7 @@ export type PushClient = any;
 export type RoomRule =
   | { kind: "bgov"; tier: number } // minimum BGOV voting power
   | { kind: "safe"; safe: Address; ens?: string } // Safe signers + proposers
-  | { kind: "token"; standard: "erc20" | "erc721"; token: Address; min: string } // min balance / NFT count
+  | { kind: "token"; standard: "erc20" | "erc721" | "erc1155"; token: Address; min: string; tokenId?: string } // min balance / NFT count; tokenId for ERC-1155 (default "0")
   | { kind: "ens"; name?: string } // a specific ENS name's address, or (no name) any ENS name
   | { kind: "role"; role: string }; // holders of an admin-assigned role
 
@@ -49,7 +49,8 @@ export function ruleLabel(rule: RoomRule): string {
   if (rule.kind === "safe") return `${rule.ens || "Safe"} signers & proposers`;
   if (rule.kind === "ens") return rule.name ? rule.name : "any ENS name";
   if (rule.kind === "role") return `${rule.role} role`;
-  return rule.standard === "erc721" ? `≥${rule.min} NFT of ${rule.token.slice(0, 6)}…` : `holds ${rule.token.slice(0, 6)}…`;
+  if (rule.standard === "erc1155") return `≥${rule.min} of ${rule.token.slice(0, 6)}… #${rule.tokenId ?? "0"}`;
+  return rule.standard === "erc721" ? `≥${rule.min} NFT of ${rule.token.slice(0, 6)}…` : `holds ≥${rule.min} of ${rule.token.slice(0, 6)}…`;
 }
 
 /** A one-line description of a gate (single rule or a combination). */
@@ -115,8 +116,8 @@ export function gateUrl(room: PushRoom): string {
   const g = room.gate;
   // Multiple rules (or a single ENS rule) ride along in the URL, base64-encoded.
   if (g.kind === "multi") return `${GATE_BASE_URL}/multi/${encodeGate(g)}/${USER}/checkAccess`;
-  // ENS + role need the registry/resolver, so they ride in the base64 multi gate.
-  if (g.kind === "ens" || g.kind === "role") return `${GATE_BASE_URL}/multi/${encodeGate({ kind: "multi", combine: "any", rules: [g] })}/${USER}/checkAccess`;
+  // ENS + role (registry/resolver) and ERC-1155 (needs a tokenId) ride in the base64 multi gate.
+  if (g.kind === "ens" || g.kind === "role" || (g.kind === "token" && g.standard === "erc1155")) return `${GATE_BASE_URL}/multi/${encodeGate({ kind: "multi", combine: "any", rules: [g] })}/${USER}/checkAccess`;
   if (g.kind === "safe") return `${GATE_BASE_URL}/safe/${g.safe}/${USER}/checkAccess`;
   if (g.kind === "token") return `${GATE_BASE_URL}/token/${g.standard}/${g.token}/${g.min}/${USER}/checkAccess`;
   return `${GATE_BASE_URL}/${g.tier}/${USER}/checkAccess`;

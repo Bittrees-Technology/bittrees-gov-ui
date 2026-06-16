@@ -78,7 +78,13 @@ function validRule(r) {
   if (!r || typeof r !== "object") return false;
   if (r.kind === "bgov") return Number.isFinite(Number(r.tier)) && Number(r.tier) >= 0;
   if (r.kind === "safe") return isAddr(r.safe);
-  if (r.kind === "token") return (r.standard === "erc20" || r.standard === "erc721") && isAddr(r.token) && /^\d+$/.test(String(r.min || ""));
+  if (r.kind === "token") {
+    if (!isAddr(r.token)) return false;
+    if (r.standard === "erc1155") return /^\d+$/.test(String(r.tokenId ?? "0")) && /^\d+$/.test(String(r.min || ""));
+    if (r.standard === "erc20") return /^\d+(\.\d+)?$/.test(String(r.min || "")); // human amount
+    if (r.standard === "erc721") return /^\d+$/.test(String(r.min || ""));
+    return false;
+  }
   if (r.kind === "ens") return r.name === undefined || r.name === "" || (typeof r.name === "string" && /\./.test(r.name) && r.name.length <= 80);
   if (r.kind === "role") return typeof r.role === "string" && r.role.trim().length > 0 && r.role.length <= 64;
   return false;
