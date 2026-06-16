@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useAccount, usePublicClient, useEnsName, useEnsAvatar } from "wagmi";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAccount, usePublicClient, useEnsName, useEnsAvatar, useWalletClient } from "wagmi";
 import { getAddress, isAddress, formatEther } from "viem";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useXmtp, type ConvSummary, type ChatMessage, type ReplyRef } from "../lib/xmtp";
@@ -32,6 +32,7 @@ import {
   roomMembers,
   setRoomRole,
   removeFromRoom,
+  joinedChats,
   gateUrl,
   type PushRoom,
   type PushMessage,
@@ -40,7 +41,7 @@ import {
   type RoomRole,
 } from "../lib/push";
 import { usePush } from "../lib/usePush";
-import { useRoomRegistry } from "../lib/rooms";
+import { useRoomRegistry, setRoomIcon } from "../lib/rooms";
 import { useCanProposeRoom } from "../lib/adminAccess";
 import { ProposeRoom } from "../components/ProposeRoom";
 import { AddressName } from "../components/AddressName";
@@ -779,12 +780,16 @@ function CommunityGroups() {
   const { data: vpData } = useVotingPowerNow(address);
   const { data: registry } = useRoomRegistry();
   const bgov = vpData ?? 0;
+  const prefs = useDmPrefs(); // room:<key> lastReadAt → unread flag
 
-  // Registry (runtime, Vercel KV) chatIds win over env (build-time) fallbacks.
+  // Registry (runtime, Vercel KV) chatIds + admin-set icons win over env/code fallbacks.
   const chatIds = registry?.chatIds;
-  const customRooms = registry?.custom ?? [];
-  const bgovRooms = BGOV_ROOMS.map((r) => ({ ...r, chatId: chatIds?.[r.key] ?? r.chatId }));
-  const safeRooms = SAFE_ROOMS.map((r) => ({ ...r, chatId: chatIds?.[r.key] ?? r.chatId }));
+  const icons = registry?.icons ?? {};
+  const withMeta = (r: PushRoom): PushRoom => ({ ...r, chatId: chatIds?.[r.key] ?? r.chatId, icon: r.icon ?? icons[r.key] });
+  const customRooms = (registry?.custom ?? []).map(withMeta);
+  const bgovRooms = BGOV_ROOMS.map(withMeta);
+  const safeRooms = SAFE_ROOMS.map(withMeta);
+  const allRooms: PushRoom[] = [...bgovRooms, ...safeRooms, ...customRooms];
   const canPropose = useCanProposeRoom(address);
 
   const push = usePush(); // shared, signature-persistent (survives tab switch + reload)
@@ -798,6 +803,19 @@ function CommunityGroups() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const roomEndRef = useRef<HTMLDivElement>(null);
   const scrollRoomRef = useRef(false); // request a scroll-to-bottom (open / send), not on load-older
+
+  // Which rooms the wallet has JOINED + their last-message time — one Push call, so the
+  // list can pin joined rooms to the top and flag unread (only runs once Push is ready).
+  const liveChatIds = allRooms.map((r) => r.chatId).filter(Boolean).join(",");
+  const joinedQ = useQuery({
+    queryKey: ["joined-chats", liveChatIds],
+    enabled: push.status === "ready" && !!liveChatIds && !!push.client,
+    staleTime: 20_000,
+    queryFn: () => joinedChats(push.client),
+  });
+  const joinedMap = joinedQ.data ?? {};
+  const isJoined = (r: PushRoom) => !!r.chatId && r.chatId in joinedMap;
+  const roomUnread = (r: PushRoom) => isJoined(r) && (joinedMap[r.chatId!] ?? 0) > (prefs[`room:${r.key}`]?.lastReadAt ?? 0);
 
   // Scroll the open room to the newest message on open + on send (not when older
   // history is prepended), so new messages read from the bottom up.
@@ -817,6 +835,7 @@ function CommunityGroups() {
       setOpenRoom(room);
       setMessages(page.messages);
       setOlderCursor(page.cursor);
+      markRead(`room:${room.key}`, Date.now()); // clear this room's unread flag
       scrollRoomRef.current = true; // jump to newest on open
     } catch (e) {
       setError(humanError(e));
@@ -878,15 +897,16 @@ function CommunityGroups() {
   if (openRoom) {
     return (
       <div className="card msg-shell" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", padding: "0.6rem 0.85rem", borderBottom: "1px solid var(--color-border)", minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.55rem", padding: "0.6rem 0.85rem", borderBottom: "1px solid var(--color-border)", minWidth: 0 }}>
           <button onClick={() => { setOpenRoom(null); setMessages([]); setOlderCursor(undefined); }} aria-label="Back to rooms" title="Back to rooms" style={{ ...linkBtn, display: "inline-flex", alignItems: "center", color: "var(--color-ink-muted)", flexShrink: 0 }}><IconBack /></button>
+          <RoomAvatar icon={openRoom.icon} size={30} />
           <span style={{ minWidth: 0, overflow: "hidden" }}>
-            <span style={{ display: "block", fontFamily: "var(--font-sans)", fontWeight: 700, fontSize: "0.9rem", color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Bittrees {openRoom.name}</span>
+            <span style={{ display: "block", fontFamily: "var(--font-sans)", fontWeight: 700, fontSize: "0.9rem", color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{openRoom.name}</span>
             <span style={{ display: "block", ...dim, fontSize: "0.68rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{openRoom.blurb}</span>
           </span>
         </div>
         {push.client && openRoom.chatId && address && (
-          <ManageMembers push={push.client} chatId={openRoom.chatId} me={address} />
+          <ManageMembers push={push.client} chatId={openRoom.chatId} me={address} roomKey={openRoom.key} icon={openRoom.icon} />
         )}
         <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "1rem", display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           {olderCursor && (
@@ -911,96 +931,100 @@ function CommunityGroups() {
     );
   }
 
+  const joinedRooms = allRooms.filter(isJoined).sort((a, b) => a.name.localeCompare(b.name));
+  const otherRooms = allRooms.filter((r) => !isJoined(r)).sort((a, b) => a.name.localeCompare(b.name));
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-      <p style={dim}>
-        Your BGOV: <strong style={{ color: "var(--color-ink)" }}>{fmtNumber(bgov)}</strong> · open any room you qualify for — access is enforced when you join.
-      </p>
-
-      {bgovRooms.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-          <p className="text-label">Shareholder rooms</p>
-          {bgovRooms.map((room) => (
-            <RoomCard key={room.key} room={room} live={!!room.chatId} eligible busy={busyKey === room.key} onOpen={open} notEligible={null} />
-          ))}
-        </div>
-      )}
-
-      {safeRooms.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-          <p className="text-label">Entity rooms — Safe signers &amp; proposers</p>
-          {safeRooms.map((room) => (
-            <RoomCard key={room.key} room={room} live={!!room.chatId} eligible busy={busyKey === room.key} onOpen={open} notEligible={null} />
-          ))}
-        </div>
-      )}
-
-      {customRooms.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-          <p className="text-label">More rooms</p>
-          {customRooms.map((room) => (
-            <RoomCard key={room.key} room={room} live={!!room.chatId} eligible busy={busyKey === room.key} onOpen={open} notEligible={null} />
-          ))}
-        </div>
-      )}
-
-      {canPropose && <ProposeRoom address={address!} />}
-
-      {error && <p role="alert" style={{ ...dim, color: "var(--color-ink)" }}>{error}</p>}
-    </div>
-  );
-}
-
-/** Presentational room row — Coming soon · Join · or a not-eligible hint. */
-function RoomCard({ room, live, eligible, busy, onOpen, notEligible, roleLabel }: {
-  room: PushRoom;
-  live: boolean;
-  eligible: boolean;
-  busy: boolean;
-  onOpen: (r: PushRoom) => void;
-  notEligible: React.ReactNode;
-  roleLabel?: string;
-}) {
-  return (
-    <div className="card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
-      <div>
-        <p style={{ fontFamily: "var(--font-serif)", fontSize: "1rem", fontWeight: 700, color: "var(--color-ink)", margin: 0 }}>
-          {room.name}
-          {roleLabel && (
-            <span style={{ fontFamily: "var(--font-sans)", fontSize: "0.62rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-primary-hover)", border: "1px solid var(--color-border-light)", borderRadius: "999px", padding: "0.05rem 0.4rem", marginLeft: "0.5rem" }}>
-              {roleLabel}
-            </span>
-          )}
-        </p>
-        <p style={{ ...dim, margin: "0.2rem 0 0" }}>{room.blurb}</p>
+    <div className="card msg-shell" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <div style={{ padding: "0.6rem 0.85rem", borderBottom: "1px solid var(--color-border)" }}>
+        <span style={{ ...dim, fontSize: "0.72rem" }}>
+          Your BGOV: <strong style={{ color: "var(--color-ink)" }}>{fmtNumber(bgov)}</strong> · open any room you qualify for — access is enforced when you join.
+        </span>
       </div>
-      {!live ? (
-        <span style={{ ...dim, fontSize: "0.78rem" }}>Coming soon</span>
-      ) : eligible ? (
-        <button className="btn-primary" disabled={busy} onClick={() => onOpen(room)} style={{ opacity: busy ? 0.6 : 1 }}>
-          {busy ? "Joining…" : "Join & open"}
-        </button>
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+        {joinedRooms.length > 0 && (
+          <>
+            <p className="text-label" style={{ margin: 0, padding: "0.55rem 0.85rem 0.3rem" }}>Joined</p>
+            {joinedRooms.map((room) => (
+              <RoomRow key={room.key} room={room} joined unread={roomUnread(room)} busy={busyKey === room.key} onOpen={() => open(room)} />
+            ))}
+          </>
+        )}
+        {otherRooms.length > 0 && (
+          <>
+            <p className="text-label" style={{ margin: 0, padding: "0.55rem 0.85rem 0.3rem" }}>{joinedRooms.length > 0 ? "All rooms" : "Community rooms"}</p>
+            {otherRooms.map((room) => (
+              <RoomRow key={room.key} room={room} joined={false} unread={false} busy={busyKey === room.key} onOpen={() => open(room)} />
+            ))}
+          </>
+        )}
+        {allRooms.length === 0 && <p style={{ ...dim, padding: "1rem" }}>No rooms available yet.</p>}
+        {canPropose && (
+          <div style={{ padding: "0.85rem", borderTop: "1px solid var(--color-border)" }}>
+            <ProposeRoom address={address!} />
+          </div>
+        )}
+      </div>
+      {error && <p role="alert" style={{ ...dim, color: "var(--color-ink)", padding: "0.5rem 0.85rem", margin: 0 }}>{error}</p>}
+    </div>
+  );
+}
+
+/** Room avatar — an admin-set emoji or http(s) image URL, falling back to 🏛. */
+function RoomAvatar({ icon, size = 34 }: { icon?: string; size?: number }) {
+  const isImg = !!icon && /^https?:\/\//i.test(icon);
+  return (
+    <span style={{ width: size, height: size, flexShrink: 0, borderRadius: "50%", overflow: "hidden", background: "var(--color-bg-subtle)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.5, lineHeight: 1 }}>
+      {isImg ? (
+        <img src={icon} alt="" width={size} height={size} style={{ width: size, height: size, objectFit: "cover" }} onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
       ) : (
-        <span style={{ ...dim, fontSize: "0.78rem", textAlign: "right" }}>{notEligible}</span>
+        <span>{icon || "🏛"}</span>
+      )}
+    </span>
+  );
+}
+
+/** A community-room row (chat-list style): avatar · name · blurb · unread dot · Join/Open. */
+function RoomRow({ room, joined, unread, busy, onOpen }: { room: PushRoom; joined: boolean; unread: boolean; busy: boolean; onOpen: () => void }) {
+  const live = !!room.chatId;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", padding: "0.55rem 0.85rem", borderBottom: "1px solid var(--color-border)" }}>
+      <RoomAvatar icon={room.icon} />
+      <span style={{ minWidth: 0, flex: 1 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: "0.35rem", minWidth: 0 }}>
+          {unread && <span aria-label="unread" title="Unread messages" style={{ width: 7, height: 7, borderRadius: "50%", background: "var(--color-primary)", flexShrink: 0 }} />}
+          <span style={{ fontSize: "0.85rem", fontWeight: unread ? 700 : 600, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{room.name}</span>
+        </span>
+        <span style={{ display: "block", fontSize: "0.72rem", color: "var(--color-ink-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{room.blurb}</span>
+      </span>
+      {!live ? (
+        <span style={{ ...dim, fontSize: "0.72rem", flexShrink: 0 }}>Coming soon</span>
+      ) : (
+        <button className="btn-primary" disabled={busy} onClick={onOpen} style={{ padding: "0.3rem 0.8rem", fontSize: "0.78rem", opacity: busy ? 0.6 : 1, flexShrink: 0 }}>{busy ? "…" : joined ? "Open" : "Join"}</button>
       )}
     </div>
   );
 }
 
-/** Room-admin panel: add a wallet as Member/Admin, or remove one (Push roles). */
-function ManageMembers({ push, chatId, me }: { push: PushClient; chatId: string; me: string }) {
+/** Room-admin panel: set the room avatar, add a wallet as Member/Admin, or remove one. */
+function ManageMembers({ push, chatId, me, roomKey, icon }: { push: PushClient; chatId: string; me: string; roomKey: string; icon?: string }) {
   const [members, setMembers] = useState<RoomMember[]>([]);
   const [show, setShow] = useState(false);
   const [addr, setAddr] = useState("");
   const [role, setRole] = useState<RoomRole>("MEMBER");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>();
+  const [iconDraft, setIconDraft] = useState(icon ?? "");
+  const { address } = useAccount();
+  const { data: walletClient } = useWalletClient();
+  const qc = useQueryClient();
 
   const load = useCallback(async () => {
     setMembers(await roomMembers(push, chatId));
   }, [push, chatId]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setIconDraft(icon ?? ""); }, [icon]);
 
   const amAdmin = members.some((m) => m.wallet === me.toLowerCase() && m.role === "ADMIN");
   if (!amAdmin) return null; // only room admins manage roles
@@ -1010,6 +1034,17 @@ function ManageMembers({ push, chatId, me }: { push: PushClient; chatId: string;
     setBusy(true); setErr(undefined);
     try { await setRoomRole(push, chatId, [addr.trim()], role); setAddr(""); await load(); }
     catch (e) { setErr(e instanceof Error ? e.message : "Failed"); }
+    finally { setBusy(false); }
+  }
+  async function saveIcon() {
+    if (!walletClient || !address) { setErr("Connect your wallet to set an avatar."); return; }
+    const v = iconDraft.trim();
+    if (v && v.length > 8 && !/^https?:\/\//i.test(v)) { setErr("Use a short emoji, or an http(s) image URL."); return; }
+    setBusy(true); setErr(undefined);
+    try {
+      await setRoomIcon({ walletClient, account: address, roomKey, icon: v });
+      await qc.invalidateQueries({ queryKey: ["room-registry"] });
+    } catch (e) { setErr(e instanceof Error ? e.message : "Failed to save avatar"); }
     finally { setBusy(false); }
   }
   async function remove(wallet: string) {
@@ -1026,6 +1061,14 @@ function ManageMembers({ push, chatId, me }: { push: PushClient; chatId: string;
       </button>
       {show && (
         <div style={{ padding: "0 0.95rem 0.85rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+          <div>
+            <p className="text-label" style={{ margin: "0 0 0.3rem" }}>Room avatar</p>
+            <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+              <RoomAvatar icon={iconDraft || undefined} size={30} />
+              <input value={iconDraft} onChange={(e) => setIconDraft(e.target.value)} placeholder="emoji or https://image-url" style={{ ...inputStyle, flex: 1, minWidth: "160px", fontSize: "0.78rem" }} />
+              <button className="btn-primary" disabled={busy || iconDraft.trim() === (icon ?? "")} onClick={saveIcon} style={{ padding: "0.4rem 0.7rem", fontSize: "0.8rem" }}>Save</button>
+            </div>
+          </div>
           <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", alignItems: "center" }}>
             <input value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="0x address" style={{ ...inputStyle, flex: 1, minWidth: "180px", fontFamily: "var(--font-mono)", fontSize: "0.78rem" }} />
             <select value={role} onChange={(e) => setRole(e.target.value as RoomRole)} style={{ ...inputStyle, width: "auto" }}>

@@ -173,13 +173,13 @@ export function ContactsView({ onMessage }: { onMessage: (address: string) => vo
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
       {sorted.map((addr) => (
-        <ContactRow key={addr} owner={address} address={addr} label={labels[addr.toLowerCase()]} onMessage={() => onMessage(addr)} />
+        <ContactRow key={addr} owner={address} address={addr} label={labels[addr.toLowerCase()]} hasEns={!!(names ?? {})[addr.toLowerCase()]} onMessage={() => onMessage(addr)} />
       ))}
     </div>
   );
 }
 
-function ContactRow({ owner, address, label, onMessage }: { owner?: string; address: string; label?: string; onMessage: () => void }) {
+function ContactRow({ owner, address, label, hasEns, onMessage }: { owner?: string; address: string; label?: string; hasEns?: boolean; onMessage: () => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(label ?? "");
   function save() {
@@ -189,7 +189,7 @@ function ContactRow({ owner, address, label, onMessage }: { owner?: string; addr
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.55rem 0.85rem", borderBottom: "1px solid var(--color-border-light)" }}>
       <span style={{ minWidth: 0, flex: 1, display: "inline-flex", alignItems: "center", gap: "0.45rem" }}>
-        {label ? (
+        {!hasEns && label ? (
           <span style={{ minWidth: 0 }}>
             <span style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
             <span style={{ display: "block", fontSize: "0.7rem", color: "var(--color-ink-dim)" }}><AddressName address={address} /></span>
@@ -206,7 +206,8 @@ function ContactRow({ owner, address, label, onMessage }: { owner?: string; addr
       ) : (
         <span style={{ display: "inline-flex", gap: "0.3rem", flexShrink: 0 }}>
           <button onClick={onMessage} style={miniBtn}>Message</button>
-          <button onClick={() => { setDraft(label ?? ""); setEditing(true); }} title="Edit private label" style={miniBtn}>✎</button>
+          {/* Private labels only for raw 0x contacts — an ENS name already names them. */}
+          {!hasEns && <button onClick={() => { setDraft(label ?? ""); setEditing(true); }} title="Edit private label" style={miniBtn}>✎</button>}
           <button onClick={() => removeContact(owner, address)} title="Remove contact" style={{ ...miniBtn, color: "#9a2a2a" }}>×</button>
         </span>
       )}

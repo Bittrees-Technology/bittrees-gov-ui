@@ -39,6 +39,8 @@ export interface PushRoom {
   /** The VITE_PUSH_ROOM_* env var holding this room's chatId (built-in rooms only). */
   envKey?: string;
   chatId?: string; // set once the group exists (registry, or env fallback)
+  /** Admin-set room avatar: an emoji, or an http(s) image URL (from the registry). */
+  icon?: string;
 }
 
 /** A one-line description of a single rule. */
@@ -191,6 +193,22 @@ export async function roomLatestTs(push: PushClient, chatId: string): Promise<nu
     return Number((raw as any[])?.[0]?.timestamp) || 0;
   } catch {
     return 0;
+  }
+}
+
+/** The chats the user has JOINED → their last-message timestamp (ms). One Push call —
+ *  used to mark rooms as joined and flag unread. Best-effort ({} on failure). */
+export async function joinedChats(push: PushClient): Promise<Record<string, number>> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const feeds: any[] = await push.chat.list("CHATS", { limit: 50 });
+    const out: Record<string, number> = {};
+    for (const f of feeds || []) {
+      if (f?.chatId) out[String(f.chatId)] = Number(f?.msg?.timestamp) || 0;
+    }
+    return out;
+  } catch {
+    return {};
   }
 }
 

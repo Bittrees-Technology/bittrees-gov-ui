@@ -14,6 +14,7 @@ const KV_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
 const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 const ROOMS_KEY = "bittrees:rooms"; // { roomKey: chatId } for built-in rooms
 const CUSTOM_KEY = "bittrees:customrooms"; // [{ key, name, blurb, gate, chatId }]
+const ICONS_KEY = "bittrees:roomicons"; // { roomKey: emoji | image URL } — admin-set
 const ROLES_KEY = "bittrees:roles"; // { <addrLower>: [{ label, color }] } — admin-assigned roles
 const SNAPSHOT_SPACE = "gov.bittrees.eth";
 const REPLAY_WINDOW_MS = 10 * 60 * 1000;
@@ -131,12 +132,13 @@ export default async function handler(req, res) {
   res.setHeader("cache-control", "no-store");
 
   if (req.method === "GET") {
-    const [rooms, custom, proposals] = await Promise.all([
+    const [rooms, custom, proposals, icons] = await Promise.all([
       readJson(ROOMS_KEY, {}),
       readJson(CUSTOM_KEY, []),
       readJson(PROPOSALS_KEY, []),
+      readJson(ICONS_KEY, {}),
     ]);
-    res.status(200).json({ rooms: rooms || {}, custom: custom || [], proposals: proposals || [] });
+    res.status(200).json({ rooms: rooms || {}, custom: custom || [], proposals: proposals || [], icons: icons || {} });
     return;
   }
 
@@ -215,6 +217,23 @@ export default async function handler(req, res) {
         const next = proposals.filter((p) => p.id !== proposalId);
         await writeJson(PROPOSALS_KEY, next);
         res.status(200).json({ ok: true, proposals: next });
+        return;
+      }
+
+      // Set (or clear) a room's avatar — an emoji or http(s) image URL.
+      if (body.icon) {
+        const key = String(body.icon.key || "").slice(0, 64);
+        const value = String(body.icon.value || "").slice(0, 400);
+        if (!key) { res.status(400).json({ error: "missing room key" }); return; }
+        // Allow only an emoji/short text, or an http(s) URL — never javascript:/data: etc.
+        const ok = value === "" || /^https?:\/\//i.test(value) || value.length <= 8;
+        if (!ok) { res.status(400).json({ error: "icon must be an emoji or http(s) image URL" }); return; }
+        const v = await verifyAdmin(address, signature, `Bittrees rooms registry\nicon ${key} = ${value}\nat ${timestamp}`);
+        if (!v.ok) { res.status(v.code).json({ error: v.error }); return; }
+        const icons = (await readJson(ICONS_KEY, {})) || {};
+        if (value) icons[key] = value; else delete icons[key];
+        await writeJson(ICONS_KEY, icons);
+        res.status(200).json({ ok: true, icons });
         return;
       }
 

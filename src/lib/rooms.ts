@@ -20,6 +20,7 @@ export interface RegistryData {
   chatIds: RoomRegistry;
   custom: PushRoom[];
   proposals: RoomProposal[];
+  icons: Record<string, string>; // roomKey -> emoji or image URL (admin-set)
 }
 
 export function useRoomRegistry() {
@@ -29,15 +30,16 @@ export function useRoomRegistry() {
     queryFn: async (): Promise<RegistryData> => {
       try {
         const r = await fetch(ROOMS_URL);
-        if (!r.ok) return { chatIds: {}, custom: [], proposals: [] };
+        if (!r.ok) return { chatIds: {}, custom: [], proposals: [], icons: {} };
         const j = await r.json();
         return {
           chatIds: (j?.rooms ?? {}) as RoomRegistry,
           custom: (j?.custom ?? []) as PushRoom[],
           proposals: (j?.proposals ?? []) as RoomProposal[],
+          icons: (j?.icons ?? {}) as Record<string, string>,
         };
       } catch {
-        return { chatIds: {}, custom: [], proposals: [] };
+        return { chatIds: {}, custom: [], proposals: [], icons: {} };
       }
     },
   });
@@ -71,6 +73,17 @@ export async function saveRoomChatId(opts: {
 }): Promise<void> {
   const { walletClient, account, roomKey, chatId } = opts;
   await postSigned(walletClient, account, `Bittrees rooms registry\nset ${roomKey} = ${chatId}`, { roomKey, chatId });
+}
+
+/** Admin: set (or clear) a room's avatar — an emoji or http(s) image URL. */
+export async function setRoomIcon(opts: {
+  walletClient: WalletClient;
+  account: `0x${string}`;
+  roomKey: string;
+  icon: string;
+}): Promise<void> {
+  const { walletClient, account, roomKey, icon } = opts;
+  await postSigned(walletClient, account, `Bittrees rooms registry\nicon ${roomKey} = ${icon}`, { icon: { key: roomKey, value: icon } });
 }
 
 /** Admin: add (or replace) a custom room with its own gate. */
