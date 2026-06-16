@@ -19,7 +19,6 @@ import {
 } from "../lib/dmPrefs";
 import { addContact } from "../lib/contacts";
 import { ensAvailable, ensYearPriceWei, ensLabel, ensAppUrl } from "../lib/ens";
-import { useProfileAvatar, setProfileAvatar, clearProfileAvatar } from "../lib/profile";
 import { useSavedMessages, addSavedMessage, deleteSavedMessage } from "../lib/savedMessages";
 import { useVotingPowerNow } from "../lib/snapshot";
 import {
@@ -501,35 +500,26 @@ function SettingsView({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
         )}
       </div>
       <p style={{ ...dim, lineHeight: 1.6, margin: 0 }}>
-        Direct messages are end-to-end encrypted over XMTP. Saved Messages, your profile picture, and these preferences are stored only on this device.
+        Direct messages are end-to-end encrypted over XMTP. Your profile picture is your ENS avatar; Saved Messages and these preferences are stored only on this device.
       </p>
     </div>
   );
 }
 
-/** Your messenger profile: avatar (local override, else your ENS avatar) + identity. */
+/** Your messenger profile = your ENS avatar. "Upload picture" opens the ENS app's
+ *  edit-profile flow (only when you have a primary ENS name), where ENS handles the
+ *  image upload, the IPFS pin, and the on-chain avatar record in one go. */
 function ProfileSection({ owner }: { owner?: string }) {
-  const local = useProfileAvatar(owner);
   const { data: ensName, isLoading: ensNameLoading } = useEnsName({ address: owner as `0x${string}` | undefined, chainId: mainnet.id });
   const { data: ensAvatar, isLoading: ensAvatarLoading } = useEnsAvatar({ name: ensName ? normalize(ensName) : undefined, chainId: mainnet.id });
-  const avatar = local || ensAvatar || null;
-  const fileRef = useRef<HTMLInputElement>(null);
-  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    if (f.size > 800_000) { alert("Please choose an image under ~800 KB."); return; }
-    const reader = new FileReader();
-    reader.onload = () => setProfileAvatar(owner, String(reader.result));
-    reader.readAsDataURL(f);
-    e.target.value = "";
-  }
+  const hasEns = !!ensName;
   return (
     <div>
       <p className="text-label" style={{ marginBottom: "0.5rem" }}>Profile</p>
       <div style={{ display: "flex", alignItems: "center", gap: "0.85rem" }}>
         <div style={{ width: 56, height: 56, flexShrink: 0, borderRadius: "50%", overflow: "hidden", background: "var(--color-bg-subtle)", border: "1px solid var(--color-border)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
-          {avatar ? (
-            <img src={avatar} alt="" width={56} height={56} style={{ width: 56, height: 56, objectFit: "cover" }} onError={(ev) => { (ev.currentTarget as HTMLImageElement).style.display = "none"; }} />
+          {ensAvatar ? (
+            <img src={ensAvatar} alt="" width={56} height={56} style={{ width: 56, height: 56, objectFit: "cover" }} onError={(ev) => { (ev.currentTarget as HTMLImageElement).style.display = "none"; }} />
           ) : (
             <span style={{ fontSize: "1.5rem" }}>👤</span>
           )}
@@ -539,48 +529,39 @@ function ProfileSection({ owner }: { owner?: string }) {
             {owner ? <AddressName address={owner} /> : "Not connected"}
           </div>
           <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.4rem", flexWrap: "wrap" }}>
-            <button onClick={() => fileRef.current?.click()} style={settingsBtn}>Upload picture</button>
-            {local && <button onClick={() => clearProfileAvatar(owner)} style={settingsBtn}>Remove</button>}
-            <input ref={fileRef} type="file" accept="image/*" onChange={onFile} style={{ display: "none" }} />
+            {hasEns ? (
+              <a href={ensAppUrl(ensName!)} target="_blank" rel="noreferrer" style={{ ...settingsBtn, textDecoration: "none" }}>
+                {ensAvatar ? "Change picture ↗" : "Upload picture ↗"}
+              </a>
+            ) : (
+              <button disabled title="Set a primary ENS name first to add a picture" style={{ ...settingsBtn, opacity: 0.5, cursor: "default" }}>Upload picture</button>
+            )}
           </div>
         </div>
       </div>
-      <p style={{ ...dim, fontSize: "0.72rem", marginTop: "0.45rem", lineHeight: 1.5, margin: "0.45rem 0 0" }}>
-        Stored on this device — the picture you see here.
-      </p>
-      {owner && (
-        <div style={{ marginTop: "0.7rem", paddingTop: "0.7rem", borderTop: "1px solid var(--color-border)" }}>
-          <p className="text-label" style={{ marginBottom: "0.4rem" }}>ENS avatar</p>
-          {ensNameLoading ? (
-            <p style={{ ...dim, fontSize: "0.72rem", margin: 0 }}>Checking ENS…</p>
-          ) : !ensName ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.6rem", flexWrap: "wrap" }}>
-              <span style={{ ...dim, fontSize: "0.72rem", lineHeight: 1.4, minWidth: 0, flex: 1 }}>
-                No primary ENS name yet — you need one to set a cross-app avatar.
-              </span>
-              <a href={ensAppUrl("")} target="_blank" rel="noreferrer" style={{ ...settingsBtn, textDecoration: "none", whiteSpace: "nowrap" }}>Get an ENS name ↗</a>
-            </div>
-          ) : (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.6rem", flexWrap: "wrap" }}>
-              <span style={{ fontSize: "0.72rem", lineHeight: 1.4, minWidth: 0, flex: 1 }}>
-                {ensAvatarLoading ? (
-                  <span style={dim}>Checking {ensName}…</span>
-                ) : ensAvatar ? (
-                  <span style={dim}><strong style={{ color: "var(--color-secondary)" }}>✓ Synced to ENS</strong> — {ensName} has an avatar set.</span>
-                ) : (
-                  <span style={dim}>Not on ENS yet — {ensName} has no avatar.</span>
-                )}
-              </span>
-              <a href={ensAppUrl(ensName)} target="_blank" rel="noreferrer" style={{ ...settingsBtn, textDecoration: "none", whiteSpace: "nowrap" }}>
-                {ensAvatar ? "Update on ENS ↗" : "Sync to ENS ↗"}
-              </a>
-            </div>
-          )}
-          <p style={{ ...dim, fontSize: "0.68rem", lineHeight: 1.5, margin: "0.4rem 0 0" }}>
-            Opens the ENS app, where you can upload this picture as your avatar — ENS pins it to IPFS so it shows across every app. (On-chain avatar records can't hold a full image, so the upload happens in the ENS app.)
+      {owner && (ensNameLoading ? (
+        <p style={{ ...dim, fontSize: "0.72rem", margin: "0.55rem 0 0" }}>Checking ENS…</p>
+      ) : !hasEns ? (
+        <p style={{ ...dim, fontSize: "0.72rem", lineHeight: 1.5, margin: "0.55rem 0 0" }}>
+          You need a primary ENS name to set a profile picture.{" "}
+          <a href={ensAppUrl("")} target="_blank" rel="noreferrer" style={{ color: "var(--color-primary-hover)", fontWeight: 600 }}>Get one on ENS ↗</a>
+        </p>
+      ) : (
+        <>
+          <p style={{ fontSize: "0.72rem", lineHeight: 1.5, margin: "0.55rem 0 0" }}>
+            {ensAvatarLoading ? (
+              <span style={dim}>Checking {ensName}…</span>
+            ) : ensAvatar ? (
+              <span style={dim}><strong style={{ color: "var(--color-secondary)" }}>✓ Picture set on ENS</strong> — {ensName}. Shown across every app.</span>
+            ) : (
+              <span style={dim}>No picture yet — Upload picture opens the ENS app to add your avatar to {ensName}.</span>
+            )}
           </p>
-        </div>
-      )}
+          <p style={{ ...dim, fontSize: "0.68rem", lineHeight: 1.5, margin: "0.35rem 0 0" }}>
+            Your picture is your ENS avatar. Upload picture opens the ENS app's edit-profile flow, where you add the image — ENS uploads it, pins it to IPFS, and writes it to your name in one transaction, so it shows everywhere. (A full image can't live in an on-chain record, so the upload happens in the ENS app.)
+          </p>
+        </>
+      ))}
     </div>
   );
 }
