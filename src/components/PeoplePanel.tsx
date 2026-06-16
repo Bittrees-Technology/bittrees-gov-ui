@@ -1,14 +1,11 @@
 import { useMemo, useState } from "react";
-import { getAddress, isAddress } from "viem";
-import { normalize } from "viem/ens";
-import { mainnet } from "viem/chains";
+import { getAddress } from "viem";
 import { useAccount } from "wagmi";
-import { getEnsAddress } from "@wagmi/core";
-import { wagmiConfig } from "../lib/chains";
 import { useCommunity, selectableRoles } from "../lib/community";
 import { useVotingPowers } from "../lib/snapshot";
 import { useContacts, addContact, removeContact, isContact } from "../lib/contacts";
 import { useBlocked, blockAddr } from "../lib/dmPrefs";
+import { useEnsNames } from "../lib/ens";
 import { AddressName } from "./AddressName";
 import { UserBadges } from "./badges";
 
@@ -20,9 +17,30 @@ function humanError(e: unknown): string {
 }
 
 /**
- * Contacts + a role picker. Choose a role from the dropdown (incl. Shareholder) to
- * list everyone who holds it, message any of them, save contacts, or message the
- * whole shown group at once.
+ * Sort addresses for display: named entries first (a saved private label, else a
+ * primary ENS name), alphabetically by that name; then raw 0x addresses, by address.
+ * So anyone "with a name" sorts above anyone shown as a bare 0x.
+ */
+export function sortByName(
+  addrs: string[],
+  names: Record<string, string | null | undefined>,
+  labels: Record<string, string | undefined>
+): string[] {
+  const disp = (a: string) => labels[a.toLowerCase()] || names[a.toLowerCase()] || "";
+  return [...addrs].sort((x, y) => {
+    const dx = disp(x);
+    const dy = disp(y);
+    if (dx && !dy) return -1;
+    if (!dx && dy) return 1;
+    if (dx && dy) return dx.toLowerCase().localeCompare(dy.toLowerCase());
+    return x.toLowerCase().localeCompare(y.toLowerCase());
+  });
+}
+
+/**
+ * Role / shareholder directory for the Search tab. Pick a role to list everyone who
+ * holds it (named entries first), message anyone, save them as a contact, or message
+ * the whole shown group at once.
  */
 export function PeoplePanel({ onMessage, onBroadcast }: {
   onMessage: (address: string) => void;
@@ -36,11 +54,7 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
   const contacts = useContacts(address);
   const roleOptions = selectableRoles(community?.roledefs);
 
-  const [roleFilter, setRoleFilter] = useState(""); // "" = Contacts
-  const [addInput, setAddInput] = useState("");
-  const [adding, setAdding] = useState(false);
-  const [err, setErr] = useState<string>();
-
+  const [roleFilter, setRoleFilter] = useState(SHAREHOLDER);
   const [bcastOpen, setBcastOpen] = useState(false);
   const [bcastText, setBcastText] = useState("");
   const [bcasting, setBcasting] = useState(false);
@@ -55,44 +69,22 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
     return [...set];
   }, [roles, contacts, me]);
 
-  // Shareholder is BGOV-derived (not in the roles registry), so resolve holdings
-  // for the known universe only when that filter is active.
   const needVp = roleFilter === SHAREHOLDER;
   const { data: vps, isLoading: vpLoading } = useVotingPowers(needVp ? universe : []);
 
   const shown: string[] = useMemo(() => {
     const blk = new Set(blocked);
     let base: string[];
-    if (roleFilter === "") base = contacts.map((c) => c.address);
-    else if (roleFilter === SHAREHOLDER) base = universe.filter((a) => (vps?.[a] ?? 0) >= 1);
+    if (roleFilter === SHAREHOLDER) base = universe.filter((a) => (vps?.[a] ?? 0) >= 1);
     else base = Object.entries(roles)
       .filter(([, list]) => (list ?? []).some((r) => r.label.toLowerCase() === roleFilter.toLowerCase()))
       .map(([a]) => a);
-    // Never list yourself or anyone you've blocked.
     return base.filter((a) => a.toLowerCase() !== me && !blk.has(a.toLowerCase()));
-  }, [roleFilter, contacts, universe, vps, roles, me, blocked]);
+  }, [roleFilter, universe, vps, roles, me, blocked]);
 
-  async function add() {
-    const v = addInput.trim();
-    if (!v) return;
-    setAdding(true);
-    setErr(undefined);
-    try {
-      let addr = v;
-      if (v.includes(".")) {
-        const resolved = await getEnsAddress(wagmiConfig, { name: normalize(v), chainId: mainnet.id });
-        if (!resolved) throw new Error("That ENS name doesn't resolve to an address.");
-        addr = resolved;
-      }
-      if (!isAddress(addr)) throw new Error("Enter a valid 0x address or ENS name.");
-      addContact(address, getAddress(addr));
-      setAddInput("");
-    } catch (e) {
-      setErr(humanError(e));
-    } finally {
-      setAdding(false);
-    }
-  }
+  const { data: names } = useEnsNames(shown);
+  const labels = useMemo(() => Object.fromEntries(contacts.map((c) => [c.address.toLowerCase(), c.label])), [contacts]);
+  const sortedShown = useMemo(() => sortByName(shown, names ?? {}, labels), [shown, names, labels]);
 
   async function sendAll() {
     if (!bcastText.trim() || shown.length === 0) return;
@@ -111,36 +103,33 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
   }
 
   return (
-    <div className="card" style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-      <p className="text-label" style={{ margin: 0 }}>People</p>
-
-      {/* Add a contact (0x or ENS) */}
-      <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-        <input value={addInput} onChange={(e) => setAddInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && add()} placeholder="Add — 0x or name.eth" style={{ ...inputStyle, flex: 1, minWidth: "150px" }} />
-        <button className="btn-primary" onClick={add} disabled={adding || !addInput.trim()} style={{ opacity: adding || !addInput.trim() ? 0.55 : 1, padding: "0.4rem 0.8rem", fontSize: "0.82rem" }}>{adding ? "…" : "Add"}</button>
-      </div>
-      {err && <p role="alert" style={{ ...dim, color: "var(--color-ink)", margin: 0 }}>{err}</p>}
-
-      {/* Pick who to show: contacts, shareholders, or a role */}
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+      <p className="text-label" style={{ margin: 0 }}>Search by role</p>
       <select value={roleFilter} onChange={(e) => { setRoleFilter(e.target.value); setBcastOpen(false); setBcastMsg(undefined); }} style={inputStyle}>
-        <option value="">Contacts ({contacts.length})</option>
         <option value={SHAREHOLDER}>Shareholders (≥1 BGOV)</option>
         {roleOptions.map((o) => <option key={o.label} value={o.label}>{o.label}</option>)}
       </select>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem", maxHeight: "300px", overflowY: "auto" }}>
+      <div style={{ display: "flex", flexDirection: "column", maxHeight: "320px", overflowY: "auto" }}>
         {needVp && vpLoading ? (
-          <p style={{ ...dim, margin: 0 }}>Checking BGOV holdings…</p>
-        ) : shown.length === 0 ? (
-          <p style={{ ...dim, margin: 0 }}>{roleFilter === "" ? "No saved contacts yet — add one above." : "No one found for that role."}</p>
+          <p style={{ ...dim, margin: "0.3rem 0" }}>Checking BGOV holdings…</p>
+        ) : sortedShown.length === 0 ? (
+          <p style={{ ...dim, margin: "0.3rem 0" }}>No one found for that role.</p>
         ) : (
-          shown.map((addr) => (
-            <PersonRow key={addr} address={addr} onMessage={onMessage} saved={isContact(address, addr)} onToggleContact={() => (isContact(address, addr) ? removeContact(address, addr) : addContact(address, getAddress(addr)))} onBlock={() => blockAddr(addr)} />
+          sortedShown.map((addr) => (
+            <PersonRow
+              key={addr}
+              address={addr}
+              label={labels[addr.toLowerCase()]}
+              onMessage={onMessage}
+              saved={isContact(address, addr)}
+              onToggleContact={() => (isContact(address, addr) ? removeContact(address, addr) : addContact(address, getAddress(addr)))}
+              onBlock={() => blockAddr(addr)}
+            />
           ))
         )}
       </div>
 
-      {/* Message everyone currently shown */}
       {shown.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", borderTop: "1px solid var(--color-border-light)", paddingTop: "0.6rem" }}>
           {!bcastOpen ? (
@@ -161,18 +150,79 @@ export function PeoplePanel({ onMessage, onBroadcast }: {
   );
 }
 
-function PersonRow({ address, onMessage, saved, onToggleContact, onBlock }: { address: string; onMessage: (a: string) => void; saved: boolean; onToggleContact: () => void; onBlock: () => void }) {
+/**
+ * The Contacts tab — saved contacts only, named entries above raw 0x, each with an
+ * editable private label (a personal nickname stored only on this device).
+ */
+export function ContactsView({ onMessage }: { onMessage: (address: string) => void }) {
+  const { address } = useAccount();
+  const contacts = useContacts(address);
+  const { data: names } = useEnsNames(contacts.map((c) => c.address));
+  const labels = useMemo(() => Object.fromEntries(contacts.map((c) => [c.address.toLowerCase(), c.label])), [contacts]);
+  const sorted = useMemo(() => sortByName(contacts.map((c) => c.address), names ?? {}, labels), [contacts, names, labels]);
+
+  if (contacts.length === 0) {
+    return (
+      <div style={{ padding: "1rem" }}>
+        <p style={dim}>No contacts yet. Use Search to find people by address, name, or role and save them with ☆ — they'll appear here.</p>
+      </div>
+    );
+  }
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.6rem", flexWrap: "wrap", padding: "0.35rem 0", borderBottom: "1px solid var(--color-border-light)" }}>
+    <div style={{ display: "flex", flexDirection: "column" }}>
+      {sorted.map((addr) => (
+        <ContactRow key={addr} owner={address} address={addr} label={labels[addr.toLowerCase()]} onMessage={() => onMessage(addr)} />
+      ))}
+    </div>
+  );
+}
+
+function ContactRow({ owner, address, label, onMessage }: { owner?: string; address: string; label?: string; onMessage: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(label ?? "");
+  function save() {
+    addContact(owner, getAddress(address), draft.trim() || undefined);
+    setEditing(false);
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.55rem 0.85rem", borderBottom: "1px solid var(--color-border-light)" }}>
+      <span style={{ minWidth: 0, flex: 1, display: "inline-flex", alignItems: "center", gap: "0.45rem" }}>
+        {label ? (
+          <span style={{ minWidth: 0 }}>
+            <span style={{ display: "block", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+            <span style={{ display: "block", fontSize: "0.7rem", color: "var(--color-ink-dim)" }}><AddressName address={address} /></span>
+          </span>
+        ) : (
+          <AddressName address={address} avatar />
+        )}
+        <UserBadges address={address} />
+      </span>
+      {editing ? (
+        <span style={{ display: "inline-flex", gap: "0.3rem", alignItems: "center", flexShrink: 0 }}>
+          <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()} placeholder="Private label" style={{ ...inputStyle, width: "120px", fontSize: "0.78rem", padding: "0.3rem 0.45rem" }} />
+          <button onClick={save} style={miniBtn}>Save</button>
+        </span>
+      ) : (
+        <span style={{ display: "inline-flex", gap: "0.3rem", flexShrink: 0 }}>
+          <button onClick={onMessage} style={miniBtn}>Message</button>
+          <button onClick={() => { setDraft(label ?? ""); setEditing(true); }} title="Edit private label" style={miniBtn}>✎</button>
+          <button onClick={() => removeContact(owner, address)} title="Remove contact" style={{ ...miniBtn, color: "#9a2a2a" }}>×</button>
+        </span>
+      )}
+    </div>
+  );
+}
+
+function PersonRow({ address, label, onMessage, saved, onToggleContact, onBlock }: { address: string; label?: string; onMessage: (a: string) => void; saved: boolean; onToggleContact: () => void; onBlock: () => void }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.6rem", flexWrap: "wrap", padding: "0.4rem 0", borderBottom: "1px solid var(--color-border-light)" }}>
       <span style={{ display: "inline-flex", alignItems: "center", gap: "0.45rem", minWidth: 0, flexWrap: "wrap" }}>
-        <AddressName address={address} avatar />
+        {label ? <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-ink)" }}>{label}</span> : <AddressName address={address} avatar />}
         <UserBadges address={address} />
       </span>
       <span style={{ display: "inline-flex", gap: "0.4rem", flexShrink: 0 }}>
         <button onClick={() => onMessage(address)} style={miniBtn}>Message</button>
-        <button onClick={onToggleContact} title={saved ? "Remove contact" : "Save contact"} style={{ ...miniBtn, color: saved ? "#9a2a2a" : "var(--color-ink-muted)" }}>
-          {saved ? "★" : "☆"}
-        </button>
+        <button onClick={onToggleContact} title={saved ? "Remove contact" : "Save contact"} style={{ ...miniBtn, color: saved ? "#9a2a2a" : "var(--color-ink-muted)" }}>{saved ? "★" : "☆"}</button>
         <button onClick={onBlock} title="Block — hide and stop DMs" style={{ ...miniBtn, color: "#9a2a2a" }}>⊘</button>
       </span>
     </div>

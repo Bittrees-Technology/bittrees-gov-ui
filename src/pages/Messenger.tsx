@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useAccount } from "wagmi";
+import { useAccount, usePublicClient } from "wagmi";
+import { getAddress, isAddress, formatEther } from "viem";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useXmtp, type ConvSummary, type ChatMessage, type ReplyRef } from "../lib/xmtp";
 import {
@@ -8,6 +9,7 @@ import {
   useBlocked,
   useDmSettings,
   setReadReceipts,
+  setConvReceipts,
   togglePin,
   setArchived,
   markRead,
@@ -15,6 +17,8 @@ import {
   blockAddr,
   unblockAddr,
 } from "../lib/dmPrefs";
+import { addContact } from "../lib/contacts";
+import { ensAvailable, ensYearPriceWei, ensLabel, ensAppUrl } from "../lib/ens";
 import { useSavedMessages, addSavedMessage, deleteSavedMessage } from "../lib/savedMessages";
 import { useVotingPowerNow } from "../lib/snapshot";
 import {
@@ -39,7 +43,7 @@ import { useRoomRegistry } from "../lib/rooms";
 import { useCanProposeRoom } from "../lib/adminAccess";
 import { ProposeRoom } from "../components/ProposeRoom";
 import { AddressName } from "../components/AddressName";
-import { PeoplePanel } from "../components/PeoplePanel";
+import { PeoplePanel, ContactsView } from "../components/PeoplePanel";
 import { getEnsAddress } from "@wagmi/core";
 import { mainnet } from "viem/chains";
 import { normalize } from "viem/ens";
@@ -109,6 +113,10 @@ function MessengerHome({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
   const [openSaved, setOpenSaved] = useState(false);
   const [openRooms, setOpenRooms] = useState(false);
 
+  // Saved Messages = a real DM with your own wallet when XMTP allows it; otherwise a
+  // device-local notes store. Try the self-DM first, fall back to local notes.
+  const openSavedMessages = async () => { if (!(await xmtp.startSelfDm())) setOpenSaved(true); };
+
   // Selecting any chat replaces the whole panel (full-screen), with a back arrow.
   if (openRooms) {
     return (
@@ -127,12 +135,8 @@ function MessengerHome({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
     <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: "480px" }}>
       <MessengerToolbar view={view} setView={setView} />
       <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-        {view === "chat" && <ChatListView xmtp={xmtp} onOpenSaved={() => setOpenSaved(true)} onOpenRooms={() => setOpenRooms(true)} />}
-        {view === "contacts" && (
-          <div style={{ padding: "0.85rem" }}>
-            <PeoplePanel onMessage={(addr) => { void xmtp.startDm(addr); }} onBroadcast={(addrs, text) => xmtp.broadcast(addrs, text)} />
-          </div>
-        )}
+        {view === "chat" && <ChatListView xmtp={xmtp} onOpenSaved={openSavedMessages} onOpenRooms={() => setOpenRooms(true)} />}
+        {view === "contacts" && <ContactsView onMessage={(addr) => { void xmtp.startDm(addr); }} />}
         {view === "search" && <SearchView xmtp={xmtp} />}
         {view === "settings" && <SettingsView onUnblock={(a) => void xmtp.setPeerConsent(a, true)} />}
       </div>
@@ -181,8 +185,10 @@ function ChatListView({ xmtp, onOpenSaved, onOpenRooms }: { xmtp: ReturnType<typ
 
   const { pinned, recent, archived, requests } = useMemo(() => {
     const blk = new Set(blocked);
+    const self = xmtp.selfAddress;
+    // Hide blocked peers, and the self-DM (it's shown as the Saved Messages row).
     const notBlocked = xmtp.conversations.filter(
-      (c) => !(c.kind === "dm" && c.peerAddress && blk.has(c.peerAddress.toLowerCase()))
+      (c) => !(c.kind === "dm" && c.peerAddress && (blk.has(c.peerAddress.toLowerCase()) || c.peerAddress.toLowerCase() === self))
     );
     const isRequest = (c: ConvSummary) => c.kind === "dm" && c.consent === "unknown" && !c.lastFromMe;
     const visible = notBlocked.filter((c) => c.consent !== "denied" && !isRequest(c));
@@ -192,7 +198,7 @@ function ChatListView({ xmtp, onOpenSaved, onOpenRooms }: { xmtp: ReturnType<typ
     const pin = live.filter((c) => prefs[c.id]?.pinned).sort((a, b) => (prefs[a.id]?.order ?? 0) - (prefs[b.id]?.order ?? 0));
     const rec = live.filter((c) => !prefs[c.id]?.pinned).sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0));
     return { pinned: pin, recent: rec, archived: arch, requests: reqs };
-  }, [xmtp.conversations, prefs, blocked]);
+  }, [xmtp.conversations, prefs, blocked, xmtp.selfAddress]);
 
   function move(id: string, dir: "up" | "down") {
     const ids = pinned.map((c) => c.id);
@@ -288,6 +294,7 @@ function DmChatView({ xmtp, onBack }: { xmtp: ReturnType<typeof useXmtp>; onBack
   const [draft, setDraft] = useState("");
   const [replyingTo, setReplyingTo] = useState<ChatMessage>();
   const active = xmtp.conversations.find((c) => c.id === xmtp.activeId);
+  const isSelf = !!active?.peerAddress && active.peerAddress.toLowerCase() === xmtp.selfAddress;
 
   useEffect(() => {
     if (xmtp.activeId) markRead(xmtp.activeId, Date.now());
@@ -307,8 +314,11 @@ function DmChatView({ xmtp, onBack }: { xmtp: ReturnType<typeof useXmtp>; onBack
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.5rem 0.7rem", borderBottom: "1px solid var(--color-border)" }}>
         <BackButton onClick={onBack} />
         <span style={{ display: "inline-flex", alignItems: "center", minWidth: 0, fontFamily: "var(--font-sans)", fontSize: "0.9rem", fontWeight: 700, color: "var(--color-ink)" }}>
-          {active?.peerAddress ? <AddressName address={active.peerAddress} avatar /> : (active?.title ?? "Conversation")}
+          {isSelf ? "🔖 Saved Messages" : active?.peerAddress ? <AddressName address={active.peerAddress} avatar /> : (active?.title ?? "Conversation")}
         </span>
+        {!isSelf && xmtp.activeId && (
+          <span style={{ marginLeft: "auto", flexShrink: 0 }}><ReceiptsControl convId={xmtp.activeId} /></span>
+        )}
       </div>
       <DmMessageList
         messages={xmtp.messages}
@@ -352,56 +362,83 @@ function SavedChatView({ owner, onBack }: { owner?: string; onBack: () => void }
   );
 }
 
-/** Search existing chats, or paste an address / ENS to start a new one. */
+/** Search: find existing chats, add someone by 0x/ENS, or browse a role directory. */
 function SearchView({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
   const [q, setQ] = useState("");
+  const [msg, setMsg] = useState<string>();
   const query = q.trim();
   const looksLikeTarget = /^0x[0-9a-fA-F]{40}$/.test(query) || (query.includes(".") && !query.includes(" "));
-  async function start() {
+
+  async function resolveTarget(): Promise<string | undefined> {
     let target = query;
     if (target.includes(".")) {
       try {
-        const resolved = await getEnsAddress(wagmiConfig, { name: normalize(target), chainId: mainnet.id });
-        if (resolved) target = resolved;
-      } catch { /* startDm reports invalid */ }
+        const r = await getEnsAddress(wagmiConfig, { name: normalize(target), chainId: mainnet.id });
+        if (r) target = r;
+      } catch { /* fall through */ }
     }
-    const ok = await xmtp.startDm(target);
+    return isAddress(target) ? getAddress(target) : undefined;
+  }
+  async function start() {
+    const addr = await resolveTarget();
+    const ok = await xmtp.startDm(addr ?? query);
     if (ok) setQ("");
   }
+  async function save() {
+    const addr = await resolveTarget();
+    if (!addr) { setMsg("Enter a valid 0x address or ENS name."); return; }
+    addContact(xmtp.selfAddress, addr);
+    setMsg(`Saved ${query} to Contacts.`);
+    setQ("");
+  }
+
   const ql = query.toLowerCase();
-  const results = query
+  const self = xmtp.selfAddress;
+  const results = (query
     ? xmtp.conversations.filter((c) =>
         (c.peerAddress?.toLowerCase().includes(ql) ?? false) ||
         c.title.toLowerCase().includes(ql) ||
-        (c.lastText?.toLowerCase().includes(ql) ?? false)
-      )
-    : xmtp.conversations.slice().sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0));
+        (c.lastText?.toLowerCase().includes(ql) ?? false))
+    : []
+  ).filter((c) => c.peerAddress?.toLowerCase() !== self);
+
   return (
-    <div style={{ padding: "0.85rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+    <div style={{ padding: "0.85rem", display: "flex", flexDirection: "column", gap: "0.7rem" }}>
       <input
         autoFocus
         value={q}
-        onChange={(e) => setQ(e.target.value)}
+        onChange={(e) => { setQ(e.target.value); setMsg(undefined); }}
         onKeyDown={(e) => { if (e.key === "Enter" && looksLikeTarget) start(); }}
-        placeholder="Search chats — or paste 0x / name.eth to start new"
+        placeholder="Search chats — or add by 0x / name.eth"
         style={{ ...inputStyle, width: "100%" }}
       />
       {looksLikeTarget && (
-        <button className="btn-primary" onClick={start} style={{ alignSelf: "flex-start", padding: "0.4rem 0.8rem", fontSize: "0.82rem" }}>Start chat with {query}</button>
+        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+          <button className="btn-primary" onClick={start} style={{ padding: "0.4rem 0.8rem", fontSize: "0.82rem" }}>Start chat</button>
+          <button onClick={save} style={{ padding: "0.4rem 0.7rem", fontSize: "0.82rem", fontWeight: 600, color: "var(--color-ink)", background: "#fff", border: "1px solid var(--color-border)", borderRadius: "2px", cursor: "pointer" }}>☆ Save contact</button>
+        </div>
       )}
-      <div>
-        {results.length === 0 ? (
-          <p style={{ ...dim, padding: "0.5rem 0" }}>{query ? "No matching chats." : "No conversations yet."}</p>
-        ) : (
-          results.map((c) => (
-            <button key={c.id} onClick={() => xmtp.openConversation(c.id)} style={{ display: "flex", flexDirection: "column", width: "100%", textAlign: "left", gap: "0.1rem", padding: "0.5rem 0.4rem", border: "none", borderBottom: "1px solid var(--color-border-light)", background: "none", cursor: "pointer", fontFamily: "var(--font-sans)" }}>
-              <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {c.peerAddress ? <AddressName address={c.peerAddress} /> : c.title}
-              </span>
-              {c.lastText && <span style={{ fontSize: "0.72rem", color: "var(--color-ink-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.lastFromMe ? "You: " : ""}{c.lastText}</span>}
-            </button>
-          ))
-        )}
+      {msg && <p style={{ ...dim, margin: 0 }}>{msg}</p>}
+
+      {query && (
+        <div>
+          {results.length === 0 ? (
+            <p style={{ ...dim, padding: "0.3rem 0" }}>No matching chats.</p>
+          ) : (
+            results.map((c) => (
+              <button key={c.id} onClick={() => xmtp.openConversation(c.id)} style={{ display: "flex", flexDirection: "column", width: "100%", textAlign: "left", gap: "0.1rem", padding: "0.5rem 0.4rem", border: "none", borderBottom: "1px solid var(--color-border-light)", background: "none", cursor: "pointer", fontFamily: "var(--font-sans)" }}>
+                <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {c.peerAddress ? <AddressName address={c.peerAddress} /> : c.title}
+                </span>
+                {c.lastText && <span style={{ fontSize: "0.72rem", color: "var(--color-ink-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.lastFromMe ? "You: " : ""}{c.lastText}</span>}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+
+      <div style={{ borderTop: "1px solid var(--color-border-light)", paddingTop: "0.7rem" }}>
+        <PeoplePanel onMessage={(addr) => { void xmtp.startDm(addr); }} onBroadcast={(addrs, text) => xmtp.broadcast(addrs, text)} />
       </div>
     </div>
   );
@@ -414,11 +451,12 @@ function SettingsView({ onUnblock }: { onUnblock: (addr: string) => void }) {
   return (
     <div style={{ padding: "0.85rem", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
       <ToggleRow
-        label="Read receipts"
-        desc="Let people see when you've read their messages — and see when they've read yours."
+        label="Read receipts (default)"
+        desc="The default for every chat — override it per conversation from the chat header. When on, people see when you've read their messages and you see when they've read yours."
         on={settings.readReceipts}
         onToggle={() => setReadReceipts(!settings.readReceipts)}
       />
+      <EnsTool />
       <div>
         <p className="text-label" style={{ marginBottom: "0.4rem" }}>Blocked ({blocked.length})</p>
         {blocked.length === 0 ? (
@@ -451,6 +489,94 @@ function ToggleRow({ label, desc, on, onToggle }: { label: string; desc: string;
       <button role="switch" aria-checked={on} onClick={onToggle} style={{ flexShrink: 0, width: 42, height: 24, borderRadius: 999, border: "none", cursor: "pointer", background: on ? "var(--color-primary)" : "var(--color-border)", position: "relative", transition: "background 0.15s" }}>
         <span style={{ position: "absolute", top: 2, left: on ? 20 : 2, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left 0.15s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
       </button>
+    </div>
+  );
+}
+
+/** Per-conversation read-receipt control (Default / On / Off), overriding the global. */
+function ReceiptsControl({ convId }: { convId: string }) {
+  const prefs = useDmPrefs();
+  const settings = useDmSettings();
+  const [open, setOpen] = useState(false);
+  const override = prefs[convId]?.readReceipts;
+  const effective = override === undefined ? settings.readReceipts : override;
+  const stateLabel = override === undefined ? "Default" : override ? "On" : "Off";
+  const opts: [string, boolean | undefined][] = [["Default", undefined], ["On", true], ["Off", false]];
+  return (
+    <span style={{ position: "relative" }}>
+      <button onClick={() => setOpen((v) => !v)} title="Read receipts for this chat" style={{ ...linkBtn, fontSize: "0.68rem", color: effective ? "var(--color-primary-hover)" : "var(--color-ink-dim)" }}>
+        {effective ? "✓✓" : "✓"} Receipts: {stateLabel}
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, background: "#fff", border: "1px solid var(--color-border)", borderRadius: "4px", boxShadow: "0 4px 14px rgba(0,0,0,0.12)", zIndex: 6, minWidth: 140 }}>
+          {opts.map(([lbl, val]) => (
+            <button key={lbl} onClick={() => { setConvReceipts(convId, val); setOpen(false); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "0.4rem 0.6rem", border: "none", background: override === val ? "var(--color-bg-subtle)" : "#fff", cursor: "pointer", fontFamily: "var(--font-sans)", fontSize: "0.76rem", color: "var(--color-ink)" }}>
+              {lbl}{lbl === "Default" ? ` (${settings.readReceipts ? "on" : "off"})` : ""}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
+/** ENS lookup tool for Settings: resolve a name↔address, check availability + price,
+ *  and hand off the actual registration to the audited ENS app. */
+function EnsTool() {
+  const client = usePublicClient({ chainId: mainnet.id });
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [out, setOut] = useState<React.ReactNode>();
+  const shorten = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
+  async function lookup() {
+    const v = q.trim();
+    if (!v || !client) return;
+    setBusy(true);
+    setOut(undefined);
+    try {
+      if (isAddress(v)) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const name = await (client as any).getEnsName({ address: getAddress(v) });
+        setOut(name ? <>Primary name: <strong>{name}</strong></> : "No primary ENS name set for this address.");
+      } else {
+        const name = v.toLowerCase().endsWith(".eth") ? v.toLowerCase() : `${v.toLowerCase()}.eth`;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const addr = await (client as any).getEnsAddress({ name: normalize(name) }).catch(() => null);
+        if (addr) {
+          setOut(<><strong>{name}</strong> → {shorten(addr)} · already registered</>);
+        } else {
+          const label = ensLabel(name);
+          const avail = await ensAvailable(client, label).catch(() => null);
+          if (avail) {
+            const wei = await ensYearPriceWei(client, label).catch(() => 0n);
+            setOut(
+              <>
+                <strong>{name}</strong> is available — ~{Number(formatEther(wei)).toFixed(4)} ETH/yr.{" "}
+                <a href={ensAppUrl(name)} target="_blank" rel="noreferrer" style={{ color: "var(--color-primary-hover)", fontWeight: 600 }}>Register on ENS ↗</a>
+              </>
+            );
+          } else {
+            setOut(`${name} isn't available to register (or isn't a 2nd-level .eth name).`);
+          }
+        }
+      }
+    } catch {
+      setOut("Lookup failed — check the name/address and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <p className="text-label" style={{ marginBottom: "0.4rem" }}>ENS</p>
+      <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+        <input value={q} onChange={(e) => { setQ(e.target.value); setOut(undefined); }} onKeyDown={(e) => e.key === "Enter" && lookup()} placeholder="name.eth or 0x address" style={{ ...inputStyle, flex: 1, minWidth: "170px" }} />
+        <button className="btn-primary" onClick={lookup} disabled={busy || !q.trim()} style={{ padding: "0.4rem 0.8rem", fontSize: "0.82rem", opacity: busy || !q.trim() ? 0.6 : 1 }}>{busy ? "…" : "Look up"}</button>
+      </div>
+      {out && <p style={{ ...dim, marginTop: "0.5rem", lineHeight: 1.55, color: "var(--color-ink-muted)" }}>{out}</p>}
+      <p style={{ ...dim, marginTop: "0.35rem", fontSize: "0.72rem" }}>Resolve names &amp; addresses, check availability, and register via the official ENS app.</p>
     </div>
   );
 }

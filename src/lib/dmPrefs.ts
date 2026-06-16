@@ -15,6 +15,7 @@ export interface DmPref {
   archived?: boolean;
   order?: number; // position among pinned (lower = higher); undefined → end
   lastReadAt?: number; // ms; messages newer than this (and not mine) are unread
+  readReceipts?: boolean; // per-conversation override of the global default; undefined → use global
 }
 export type DmPrefs = Record<string, DmPref>;
 
@@ -162,4 +163,15 @@ export function setReadReceipts(on: boolean) {
 /** Non-hook read for the XMTP layer (decides whether to emit read receipts). */
 export function readReceiptsEnabled(): boolean {
   return settingsCache.readReceipts;
+}
+
+/** Per-conversation read-receipt override. Pass undefined to fall back to the global default. */
+export function setConvReceipts(id: string, value: boolean | undefined) {
+  patch(id, { readReceipts: value });
+}
+
+/** Effective read-receipt setting for one conversation: its override, else the global default. */
+export function receiptsEnabledForConv(id: string): boolean {
+  const override = prefsCache[id]?.readReceipts;
+  return override === undefined ? settingsCache.readReceipts : override;
 }
