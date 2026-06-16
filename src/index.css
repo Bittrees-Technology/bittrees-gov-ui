@@ -326,6 +326,19 @@ h2, h3, h4, h5, h6 {
   }
 }
 
+/* iOS Safari auto-zooms into a focused text field when its font-size is < 16px —
+   and on a home-screen (standalone) PWA the page stays zoomed + misaligned after.
+   Forcing form controls to 16px on phones removes the zoom trigger entirely (the
+   !important is needed to beat the compact inline font-sizes on these inputs). It
+   does NOT disable pinch-zoom, so accessibility is preserved. */
+@media (max-width: 640px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
 /* ============================================================
    RainbowKit theme overrides
    ============================================================ */
