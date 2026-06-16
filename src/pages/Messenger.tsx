@@ -74,7 +74,7 @@ function describePushError(e: unknown): string {
   const msg = String(x?.message || x?.details || "");
   const code = msg.match(/status code (\d{3})/i)?.[1];
   if (code === "403") {
-    return "Push refused this (403 Forbidden) without a detailed reason. Most often it means the room is gated and the address doesn't meet its access rule yet — gated rooms only admit qualifying addresses. For a role room, assign the role first (Admin → Roles & tags); for a token room the address needs the required balance. (Also confirm your wallet is still an admin of this room.)";
+    return "Push refused this (403 Forbidden) without a detailed reason. Most likely the address hasn't activated Push messaging yet — to join or be added to a room it must first open the messenger, connect, and enable messages once (a free, no-gas signature). Once activated, if it holds the required role/tokens it can Join the room itself. (If it's already activated, re-check that it meets the room's gate and that your wallet is an admin here.)";
   }
   if (code === "401") return "Push rejected the request (401) — your messaging session may have expired. Reload the page and re-enable messaging.";
   if (code) return `Push request failed (HTTP ${code}). ${msg}`;
