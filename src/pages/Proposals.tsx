@@ -1,9 +1,7 @@
 import { Link } from "react-router";
 import { useProposals, winningChoice, proposalOutcome } from "../lib/snapshot";
 import { StateBadge, OutcomeBadge, ResultBar } from "../components/gov";
-import { fmtNumber, relativeTime, GOV_LINKS, ROUTES } from "../lib/links";
-
-const linkStyle = { color: "var(--color-primary-hover)", textDecoration: "none", fontWeight: 600 } as const;
+import { fmtNumber, relativeTime, ROUTES } from "../lib/links";
 
 export default function Proposals() {
   const { data: proposals, isLoading, isError } = useProposals(30);
@@ -32,10 +30,7 @@ export default function Proposals() {
             marginTop: "0.5rem",
           }}
         >
-          Bittrees Improvement Proposals (BIPs), voted by BGOV common-stock holders. Create, vote, and
-          moderate right here — each action is signed by your wallet and recorded on{" "}
-          <a href={GOV_LINKS.snapshot} target="_blank" rel="noreferrer" style={linkStyle}>Snapshot</a>{" "}
-          (gov.bittrees.eth). No link-out required.
+          Bittrees Improvement Proposals (BIPs), voted by BGOV common-stock holders.
         </p>
       </header>
 
