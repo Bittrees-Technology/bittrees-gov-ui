@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAccount, usePublicClient, useEnsName, useEnsAvatar, useWalletClient } from "wagmi";
+import { useAccount, usePublicClient, useEnsName, useEnsAvatar, useWalletClient, useSwitchChain } from "wagmi";
 import { getAddress, isAddress, formatEther } from "viem";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useXmtp, type ConvSummary, type ChatMessage, type ReplyRef } from "../lib/xmtp";
@@ -18,7 +18,7 @@ import {
   unblockAddr,
 } from "../lib/dmPrefs";
 import { addContact } from "../lib/contacts";
-import { ensAvailable, ensYearPriceWei, ensLabel, ensAppUrl } from "../lib/ens";
+import { ensAvailable, ensYearPriceWei, ensLabel, ensAppUrl, ETH_REGISTRAR_CONTROLLER, REGISTRAR_WRITE_ABI, PUBLIC_RESOLVER, REGISTRATION_DURATION, ensRegisterData, ensMinCommitmentAge } from "../lib/ens";
 import { useSavedMessages, addSavedMessage, deleteSavedMessage } from "../lib/savedMessages";
 import { useVotingPowerNow } from "../lib/snapshot";
 import {
@@ -46,7 +46,7 @@ import { useCanProposeRoom } from "../lib/adminAccess";
 import { ProposeRoom } from "../components/ProposeRoom";
 import { AddressName } from "../components/AddressName";
 import { PeoplePanel, ContactsView } from "../components/PeoplePanel";
-import { getEnsAddress } from "@wagmi/core";
+import { getEnsAddress, getWalletClient } from "@wagmi/core";
 import { mainnet } from "viem/chains";
 import { normalize } from "viem/ens";
 import { wagmiConfig } from "../lib/chains";
@@ -659,6 +659,130 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
+/* ── In-app .eth registration (commit → wait ~60s → reveal; real ETH, mainnet) ──── */
+interface StoredCommit { secret: `0x${string}`; committedAt: number } // committedAt = unix seconds
+
+function loadCommit(key: string): StoredCommit | null {
+  try { const v = JSON.parse(localStorage.getItem(key) || "null"); return v && typeof v.secret === "string" ? v : null; } catch { return null; }
+}
+function saveCommit(key: string, c: StoredCommit | null) {
+  try { if (c) localStorage.setItem(key, JSON.stringify(c)); else localStorage.removeItem(key); } catch { /* ignore */ }
+}
+function randomSecret(): `0x${string}` {
+  const b = crypto.getRandomValues(new Uint8Array(32));
+  return ("0x" + Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("")) as `0x${string}`;
+}
+
+/**
+ * Register an available .eth name in-app via the ENS commit→reveal flow. REAL ETH on
+ * mainnet: two transactions ~minCommitmentAge (~60s) apart. The commitment secret is
+ * persisted in localStorage so the wait survives a refresh; the name is registered
+ * with the PublicResolver + a forward addr record (so it resolves to its owner) but
+ * reverseRecord=false (we don't overwrite the wallet's existing primary name). The
+ * register value includes a small buffer; the controller refunds any excess.
+ */
+function EnsRegister({ name, priceEth }: { name: string; priceEth: string }) {
+  const { address, chainId } = useAccount();
+  const mainnetClient = usePublicClient({ chainId: mainnet.id });
+  const { switchChainAsync } = useSwitchChain();
+  const label = ensLabel(name);
+  const key = address ? `bittrees.ens.commit.${address.toLowerCase()}.${label}` : "";
+  const [commit, setCommit] = useState<StoredCommit | null>(() => (key ? loadCommit(key) : null));
+  const [minAge, setMinAge] = useState(60);
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  const [phase, setPhase] = useState<"idle" | "committing" | "registering" | "done">("idle");
+  const [err, setErr] = useState<string>();
+
+  useEffect(() => { if (mainnetClient) ensMinCommitmentAge(mainnetClient).then(setMinAge).catch(() => {}); }, [mainnetClient]);
+  useEffect(() => {
+    if (!commit || phase === "done") return;
+    const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [commit, phase]);
+
+  if (!address) {
+    return <p style={{ ...dim, fontSize: "0.72rem", marginTop: "0.4rem" }}>Connect a wallet to register {name} here.</p>;
+  }
+
+  const elapsed = commit ? now - commit.committedAt : 0;
+  const remaining = Math.max(0, minAge - elapsed);
+  const expired = commit ? elapsed > 86400 : false; // commitments expire after ~24h
+  const data = ensRegisterData(name, address);
+
+  async function mainnetWallet() {
+    if (chainId !== mainnet.id) await switchChainAsync({ chainId: mainnet.id });
+    const wc = await getWalletClient(wagmiConfig, { chainId: mainnet.id });
+    if (!wc) throw new Error("No wallet available on Ethereum mainnet.");
+    return wc;
+  }
+
+  async function doCommit() {
+    if (!mainnetClient || !address) return;
+    if (!confirm(`Register ${name} for ~${priceEth} ETH/yr?\n\nThis is two transactions on Ethereum mainnet about ${minAge}s apart, paid in real ETH: step 1 (commit) now, step 2 (register) after the wait.`)) return;
+    setErr(undefined); setPhase("committing");
+    try {
+      const wc = await mainnetWallet();
+      const secret = randomSecret();
+      const commitment = await mainnetClient.readContract({ address: ETH_REGISTRAR_CONTROLLER, abi: REGISTRAR_WRITE_ABI, functionName: "makeCommitment", args: [label, address, REGISTRATION_DURATION, secret, PUBLIC_RESOLVER, data, false, 0] }) as `0x${string}`;
+      const hash = await wc.writeContract({ address: ETH_REGISTRAR_CONTROLLER, abi: REGISTRAR_WRITE_ABI, functionName: "commit", args: [commitment], account: address, chain: mainnet });
+      await mainnetClient.waitForTransactionReceipt({ hash });
+      const c: StoredCommit = { secret, committedAt: Math.floor(Date.now() / 1000) };
+      saveCommit(key, c); setCommit(c); setNow(c.committedAt);
+    } catch (e) {
+      setErr(humanError(e));
+    } finally {
+      setPhase("idle");
+    }
+  }
+
+  async function doRegister() {
+    if (!mainnetClient || !address || !commit) return;
+    setErr(undefined); setPhase("registering");
+    try {
+      const wc = await mainnetWallet();
+      const priceWei = await ensYearPriceWei(mainnetClient, label);
+      const value = (priceWei * 105n) / 100n; // +5% buffer; the controller refunds any excess
+      const hash = await wc.writeContract({ address: ETH_REGISTRAR_CONTROLLER, abi: REGISTRAR_WRITE_ABI, functionName: "register", args: [label, address, REGISTRATION_DURATION, commit.secret, PUBLIC_RESOLVER, data, false, 0], value, account: address, chain: mainnet });
+      await mainnetClient.waitForTransactionReceipt({ hash });
+      saveCommit(key, null); setCommit(null); setPhase("done");
+    } catch (e) {
+      setErr(humanError(e)); setPhase("idle");
+    }
+  }
+
+  function reset() { saveCommit(key, null); setCommit(null); setErr(undefined); setPhase("idle"); }
+
+  return (
+    <div style={{ marginTop: "0.5rem", padding: "0.6rem 0.7rem", border: "1px solid var(--color-border)", borderRadius: "2px", background: "var(--color-bg-subtle)" }}>
+      {phase === "done" ? (
+        <p style={{ fontSize: "0.78rem", margin: 0 }}><strong style={{ color: "var(--color-secondary)" }}>✓ Registered {name}</strong> — it may take a moment to resolve.</p>
+      ) : !commit ? (
+        <>
+          <button className="btn-primary" disabled={phase === "committing"} onClick={doCommit} style={{ padding: "0.4rem 0.8rem", fontSize: "0.82rem", opacity: phase === "committing" ? 0.6 : 1 }}>
+            {phase === "committing" ? "Confirm step 1 in wallet…" : `Register here (~${priceEth} ETH/yr)`}
+          </button>
+          <p style={{ ...dim, fontSize: "0.68rem", margin: "0.4rem 0 0", lineHeight: 1.5 }}>Two transactions on Ethereum mainnet ~{minAge}s apart (ENS commit→reveal), paid in real ETH. Or <a href={ensAppUrl(name)} target="_blank" rel="noreferrer" style={{ color: "var(--color-primary-hover)", fontWeight: 600 }}>use the ENS app ↗</a>.</p>
+        </>
+      ) : expired ? (
+        <>
+          <p style={{ ...dim, fontSize: "0.74rem", margin: "0 0 0.4rem" }}>Your commit expired (older than 24h). Start again.</p>
+          <button onClick={reset} style={settingsBtn}>Restart</button>
+        </>
+      ) : remaining > 0 ? (
+        <p style={{ ...dim, fontSize: "0.78rem", margin: 0 }}>Step 1 confirmed ✓ — waiting {remaining}s before step 2 (required by ENS)…</p>
+      ) : (
+        <>
+          <button className="btn-primary" disabled={phase === "registering"} onClick={doRegister} style={{ padding: "0.4rem 0.8rem", fontSize: "0.82rem", opacity: phase === "registering" ? 0.6 : 1 }}>
+            {phase === "registering" ? "Confirm step 2 in wallet…" : `Complete registration (~${priceEth} ETH + gas)`}
+          </button>
+          <button onClick={reset} style={{ ...settingsBtn, marginLeft: "0.4rem" }}>Cancel</button>
+        </>
+      )}
+      {err && <p role="alert" style={{ ...dim, color: "var(--color-ink)", fontSize: "0.72rem", margin: "0.4rem 0 0" }}>{err}</p>}
+    </div>
+  );
+}
+
 function EnsTool({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
   const client = usePublicClient({ chainId: mainnet.id });
   const [q, setQ] = useState("");
@@ -701,6 +825,7 @@ function EnsTool({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
           )}
         </p>
       ) : null}
+      {r?.kind === "available" && <EnsRegister name={r.name} priceEth={r.priceEth} />}
       {foundAddr && (
         <div style={{ display: "flex", gap: "0.4rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
           <button className="btn-primary" onClick={() => void xmtp.startDm(foundAddr)} style={{ padding: "0.35rem 0.75rem", fontSize: "0.8rem" }}>Start chat</button>

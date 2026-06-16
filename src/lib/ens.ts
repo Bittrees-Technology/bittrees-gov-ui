@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { usePublicClient } from "wagmi";
-import { normalize } from "viem/ens";
+import { normalize, namehash } from "viem/ens";
+import { encodeFunctionData } from "viem";
 import { mainnet } from "viem/chains";
 
 /**
@@ -122,4 +123,51 @@ export async function ensAvailable(client: any, label: string): Promise<boolean>
 export async function ensYearPriceWei(client: any, label: string): Promise<bigint> {
   const p = (await client.readContract({ address: ETH_REGISTRAR_CONTROLLER, abi: CONTROLLER_ABI, functionName: "rentPrice", args: [label, YEAR_SECONDS] })) as { base: bigint; premium: bigint };
   return p.base + p.premium;
+}
+
+/* ── In-app .eth registration (commit → wait → reveal, real ETH on mainnet) ──────
+   The same ETHRegistrarController above (confirmed live via available/rentPrice)
+   also exposes the commit-reveal interface. Mainnet PublicResolver is set so the
+   name resolves to its owner (forward addr record) + a reverse record. */
+export const PUBLIC_RESOLVER = "0x231b0Ee14048e9dCcD1d247744d114a4EB5E8E63" as const;
+export const REGISTRATION_DURATION = YEAR_SECONDS; // 1 year
+
+export const REGISTRAR_WRITE_ABI = [
+  { type: "function", name: "minCommitmentAge", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "maxCommitmentAge", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
+  {
+    type: "function", name: "makeCommitment", stateMutability: "pure",
+    inputs: [
+      { name: "name", type: "string" }, { name: "owner", type: "address" }, { name: "duration", type: "uint256" },
+      { name: "secret", type: "bytes32" }, { name: "resolver", type: "address" }, { name: "data", type: "bytes[]" },
+      { name: "reverseRecord", type: "bool" }, { name: "ownerControlledFuses", type: "uint16" },
+    ],
+    outputs: [{ type: "bytes32" }],
+  },
+  { type: "function", name: "commit", stateMutability: "nonpayable", inputs: [{ name: "commitment", type: "bytes32" }], outputs: [] },
+  {
+    type: "function", name: "register", stateMutability: "payable",
+    inputs: [
+      { name: "name", type: "string" }, { name: "owner", type: "address" }, { name: "duration", type: "uint256" },
+      { name: "secret", type: "bytes32" }, { name: "resolver", type: "address" }, { name: "data", type: "bytes[]" },
+      { name: "reverseRecord", type: "bool" }, { name: "ownerControlledFuses", type: "uint16" },
+    ],
+    outputs: [],
+  },
+] as const;
+
+const RESOLVER_SETADDR_ABI = [
+  { type: "function", name: "setAddr", stateMutability: "nonpayable", inputs: [{ name: "node", type: "bytes32" }, { name: "a", type: "address" }], outputs: [] },
+] as const;
+
+/** Resolver-call payload to point the new name's ETH address at its owner (forward resolution). */
+export function ensRegisterData(name: string, owner: `0x${string}`): `0x${string}`[] {
+  return [encodeFunctionData({ abi: RESOLVER_SETADDR_ABI, functionName: "setAddr", args: [namehash(normalize(name)), owner] })];
+}
+
+/** Min seconds between commit and register (the mandatory wait; ~60s on mainnet). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function ensMinCommitmentAge(client: any): Promise<number> {
+  const s = (await client.readContract({ address: ETH_REGISTRAR_CONTROLLER, abi: REGISTRAR_WRITE_ABI, functionName: "minCommitmentAge" })) as bigint;
+  return Number(s);
 }
