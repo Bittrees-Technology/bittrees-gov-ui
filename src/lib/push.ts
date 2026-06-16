@@ -196,20 +196,25 @@ export async function roomLatestTs(push: PushClient, chatId: string): Promise<nu
   }
 }
 
-/** The chats the user has JOINED → their last-message timestamp (ms). One Push call —
- *  used to mark rooms as joined and flag unread. Best-effort ({} on failure). */
+/** The chats the user has JOINED → their last-message timestamp (ms). Used to mark
+ *  rooms as joined and flag unread. Push caps `limit` at 30, so page through (bounded)
+ *  for wallets in many chats. Best-effort — returns whatever it gathered on failure. */
 export async function joinedChats(push: PushClient): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const feeds: any[] = await push.chat.list("CHATS", { limit: 50 });
-    const out: Record<string, number> = {};
-    for (const f of feeds || []) {
-      if (f?.chatId) out[String(f.chatId)] = Number(f?.msg?.timestamp) || 0;
+    for (let page = 1; page <= 5; page++) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const feeds: any[] = await push.chat.list("CHATS", { page, limit: 30 });
+      const arr = Array.isArray(feeds) ? feeds : [];
+      for (const f of arr) {
+        if (f?.chatId) out[String(f.chatId)] = Number(f?.msg?.timestamp) || 0;
+      }
+      if (arr.length < 30) break; // last page reached
     }
-    return out;
   } catch {
-    return {};
+    // keep whatever pages succeeded
   }
+  return out;
 }
 
 /** A page of room history (oldest→newest) + a cursor to fetch the NEXT older page
