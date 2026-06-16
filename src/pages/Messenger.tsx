@@ -816,8 +816,7 @@ function EnsTool({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
           ) : r.kind === "registered" ? (
             <><strong>{r.name}</strong> → {shorten(r.address)} · already registered</>
           ) : r.kind === "available" ? (
-            <><strong style={{ color: "var(--color-secondary)" }}>{r.name} is available</strong> — ~{r.priceEth} ETH/yr.{" "}
-              <a href={ensAppUrl(r.name)} target="_blank" rel="noreferrer" style={{ color: "var(--color-primary-hover)", fontWeight: 600 }}>Register on ENS ↗</a></>
+            <><strong style={{ color: "var(--color-secondary)" }}>{r.name} is available</strong> — ~{r.priceEth} ETH/yr.</>
           ) : r.kind === "unavailable" ? (
             <>{r.name} isn't available to register (or isn't a 2nd-level .eth name).</>
           ) : (
@@ -833,7 +832,7 @@ function EnsTool({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
         </div>
       )}
       {actMsg && <p style={{ ...dim, marginTop: "0.35rem" }}>{actMsg}</p>}
-      <p style={{ ...dim, marginTop: "0.35rem", fontSize: "0.72rem" }}>Type a name to check availability live, or an address to reverse-resolve. Register via the official ENS app; if a wallet is on XMTP you can start a chat or save them here.</p>
+      <p style={{ ...dim, marginTop: "0.35rem", fontSize: "0.72rem" }}>Type a name to check availability live, or an address to reverse-resolve.</p>
     </div>
   );
 }
