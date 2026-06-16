@@ -46,8 +46,18 @@ const mainnetRpc = import.meta.env.VITE_MAINNET_RPC_URL as string | undefined;
 // it. (wagmi's per-hook multicall batching is separate and still applies.)
 const httpConfig = { batch: true } as const;
 
+// WalletConnect metadata.url must match the page ORIGIN, not the current route.
+// Left unset, RainbowKit defaults it to window.location.href (e.g. …/messenger),
+// which trips the "configured metadata.url differs from the actual page url" warning
+// and weakens WalletConnect's domain verification. Use the live origin so it always
+// matches (correct on prod, Vercel previews, and local dev alike).
+const appOrigin = typeof window !== "undefined" ? window.location.origin : "https://gov.bittrees.org";
+
 export const wagmiConfig = getDefaultConfig({
   appName: "Bittrees, Inc. Governance",
+  appDescription: "Bittrees, Inc. governance — proposals, voting, and community.",
+  appUrl: appOrigin,
+  appIcon: `${appOrigin}/bittrees_logo_tree.png`,
   projectId,
   // Mainnet for governance (BGOV voting, mint); Base carries the on-chain EAS
   // forum (cheap attestations). The wallet switches to Base only to post.
