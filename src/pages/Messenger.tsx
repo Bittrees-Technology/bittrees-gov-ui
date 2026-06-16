@@ -15,6 +15,7 @@ import {
   blockAddr,
   unblockAddr,
 } from "../lib/dmPrefs";
+import { useSavedMessages, addSavedMessage, deleteSavedMessage } from "../lib/savedMessages";
 import { useVotingPowerNow } from "../lib/snapshot";
 import {
   BGOV_ROOMS,
@@ -55,8 +56,6 @@ function humanError(e: unknown): string {
 
 export default function Messenger() {
   const { isConnected } = useAccount();
-  const [tab, setTab] = useState<"dms" | "groups">("dms");
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
       <header style={{ borderBottom: "1px solid var(--color-border)", paddingBottom: "1.5rem" }}>
@@ -64,44 +63,15 @@ export default function Messenger() {
         <h1 className="text-display">Messenger</h1>
       </header>
 
-      <div style={{ display: "flex", gap: "0.25rem", borderBottom: "1px solid var(--color-border)" }}>
-        <TabBtn active={tab === "dms"} onClick={() => setTab("dms")}>Direct messages</TabBtn>
-        <TabBtn active={tab === "groups"} onClick={() => setTab("groups")}>Community rooms</TabBtn>
-      </div>
-
       {!isConnected ? (
         <div className="card" style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
           <p style={{ ...dim, margin: 0 }}>Connect a wallet to message.</p>
           <ConnectButton chainStatus="none" showBalance={false} />
         </div>
-      ) : tab === "dms" ? (
-        <DirectMessages />
       ) : (
-        <CommunityGroups />
+        <DirectMessages />
       )}
     </div>
-  );
-}
-
-function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: "0.5rem 0.9rem",
-        fontFamily: "var(--font-sans)",
-        fontSize: "0.875rem",
-        fontWeight: active ? 700 : 500,
-        color: active ? "var(--color-ink)" : "var(--color-ink-muted)",
-        background: "none",
-        border: "none",
-        borderBottom: `2px solid ${active ? "var(--color-primary)" : "transparent"}`,
-        cursor: "pointer",
-        marginBottom: "-1px",
-      }}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -127,51 +97,100 @@ function DirectMessages() {
       </div>
     );
   }
+  return <MessengerHome xmtp={xmtp} />;
+}
+
+/* ── Messenger shell — Telegram-style: 4-button toolbar + full-screen chats ── */
+type ShellView = "search" | "contacts" | "chat" | "settings";
+
+function MessengerHome({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
+  const { address } = useAccount();
+  const [view, setView] = useState<ShellView>("chat");
+  const [openSaved, setOpenSaved] = useState(false);
+  const [openRooms, setOpenRooms] = useState(false);
+
+  // Selecting any chat replaces the whole panel (full-screen), with a back arrow.
+  if (openRooms) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+        <button onClick={() => setOpenRooms(false)} style={{ ...linkBtn, alignSelf: "flex-start", fontSize: "0.85rem", color: "var(--color-primary-hover)", display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+          <IconBack /> All chats
+        </button>
+        <CommunityGroups />
+      </div>
+    );
+  }
+  if (openSaved) return <SavedChatView owner={address} onBack={() => setOpenSaved(false)} />;
+  if (xmtp.activeId) return <DmChatView xmtp={xmtp} onBack={() => xmtp.closeConversation()} />;
+
   return (
-    <div className="dm-layout">
-      <PeoplePanel onMessage={(addr) => { void xmtp.startDm(addr); }} onBroadcast={(addrs, text) => xmtp.broadcast(addrs, text)} />
-      <Chat xmtp={xmtp} />
+    <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: "480px" }}>
+      <MessengerToolbar view={view} setView={setView} />
+      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+        {view === "chat" && <ChatListView xmtp={xmtp} onOpenSaved={() => setOpenSaved(true)} onOpenRooms={() => setOpenRooms(true)} />}
+        {view === "contacts" && (
+          <div style={{ padding: "0.85rem" }}>
+            <PeoplePanel onMessage={(addr) => { void xmtp.startDm(addr); }} onBroadcast={(addrs, text) => xmtp.broadcast(addrs, text)} />
+          </div>
+        )}
+        {view === "search" && <SearchView xmtp={xmtp} />}
+        {view === "settings" && <SettingsView onUnblock={(a) => void xmtp.setPeerConsent(a, true)} />}
+      </div>
+      {xmtp.error && (
+        <p role="alert" style={{ fontFamily: "var(--font-sans)", fontSize: "0.78rem", color: "var(--color-ink)", padding: "0 0.85rem 0.85rem", margin: 0 }}>{xmtp.error}</p>
+      )}
     </div>
   );
 }
 
-function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
-  const [dmInput, setDmInput] = useState("");
-  const [draft, setDraft] = useState("");
-  const [menuId, setMenuId] = useState<string>();
-  const [showArchived, setShowArchived] = useState(false);
-  const [showBlocked, setShowBlocked] = useState(false);
-  const [showRequests, setShowRequests] = useState(true);
-  const [replyingTo, setReplyingTo] = useState<ChatMessage>();
+function MessengerToolbar({ view, setView }: { view: ShellView; setView: (v: ShellView) => void }) {
+  const items: { key: ShellView; label: string; icon: React.ReactNode }[] = [
+    { key: "search", label: "Search", icon: <IconSearch /> },
+    { key: "contacts", label: "Contacts", icon: <IconContacts /> },
+    { key: "chat", label: "Chat", icon: <IconChat /> },
+    { key: "settings", label: "Settings", icon: <IconGear /> },
+  ];
+  return (
+    <div style={{ display: "flex", borderBottom: "1px solid var(--color-border)" }}>
+      {items.map((it) => {
+        const active = view === it.key;
+        return (
+          <button
+            key={it.key}
+            onClick={() => setView(it.key)}
+            aria-current={active}
+            style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: "0.18rem", padding: "0.55rem 0.3rem", background: active ? "var(--color-bg-subtle)" : "transparent", border: "none", borderBottom: `2px solid ${active ? "var(--color-primary)" : "transparent"}`, marginBottom: "-1px", cursor: "pointer", color: active ? "var(--color-primary-hover)" : "var(--color-ink-muted)" }}
+          >
+            {it.icon}
+            <span style={{ fontFamily: "var(--font-sans)", fontSize: "0.66rem", fontWeight: active ? 700 : 500 }}>{it.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* The conversation list (Telegram-style): Archived (top) · Saved Messages · Requests
+   · Pinned · recent DMs · a Community-rooms entry. */
+function ChatListView({ xmtp, onOpenSaved, onOpenRooms }: { xmtp: ReturnType<typeof useXmtp>; onOpenSaved: () => void; onOpenRooms: () => void }) {
   const prefs = useDmPrefs();
   const blocked = useBlocked();
-  const settings = useDmSettings();
-  const active = xmtp.conversations.find((c) => c.id === xmtp.activeId);
+  const [menuId, setMenuId] = useState<string>();
+  const [showArchived, setShowArchived] = useState(false);
+  const [showRequests, setShowRequests] = useState(true);
 
-  // Keep the open conversation marked read as it's viewed / new messages arrive.
-  useEffect(() => {
-    if (xmtp.activeId) markRead(xmtp.activeId, Date.now());
-  }, [xmtp.activeId, xmtp.messages.length]);
-
-  // Partition: pinned (manual order) → recent (newest first) → archived → blocked.
-  // DMs whose peer is blocked are dropped from the visible list entirely.
   const { pinned, recent, archived, requests } = useMemo(() => {
     const blk = new Set(blocked);
     const notBlocked = xmtp.conversations.filter(
       (c) => !(c.kind === "dm" && c.peerAddress && blk.has(c.peerAddress.toLowerCase()))
     );
-    // Inbound DMs we haven't consented to yet surface as requests, not the main list.
     const isRequest = (c: ConvSummary) => c.kind === "dm" && c.consent === "unknown" && !c.lastFromMe;
     const visible = notBlocked.filter((c) => c.consent !== "denied" && !isRequest(c));
     const reqs = notBlocked.filter(isRequest).sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0));
     const arch = visible.filter((c) => prefs[c.id]?.archived);
     const live = visible.filter((c) => !prefs[c.id]?.archived);
-    const pin = live
-      .filter((c) => prefs[c.id]?.pinned)
-      .sort((a, b) => (prefs[a.id]?.order ?? 0) - (prefs[b.id]?.order ?? 0));
-    const rec = live
-      .filter((c) => !prefs[c.id]?.pinned)
-      .sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0));
+    const pin = live.filter((c) => prefs[c.id]?.pinned).sort((a, b) => (prefs[a.id]?.order ?? 0) - (prefs[b.id]?.order ?? 0));
+    const rec = live.filter((c) => !prefs[c.id]?.pinned).sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0));
     return { pinned: pin, recent: rec, archived: arch, requests: reqs };
   }, [xmtp.conversations, prefs, blocked]);
 
@@ -189,38 +208,10 @@ function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
     blockAddr(c.peerAddress);
     await xmtp.setPeerConsent(c.peerAddress, false);
   }
-  async function unblock(addr: string) {
-    unblockAddr(addr);
-    await xmtp.setPeerConsent(addr, true);
-  }
-
-  async function start() {
-    let target = dmInput.trim();
-    if (target.includes(".")) {
-      // Resolve an ENS name to its address before starting the DM.
-      try {
-        const resolved = await getEnsAddress(wagmiConfig, { name: normalize(target), chainId: mainnet.id });
-        if (resolved) target = resolved;
-      } catch { /* fall through — startDm will report an invalid address */ }
-    }
-    const ok = await xmtp.startDm(target);
-    if (ok) setDmInput("");
-  }
-  async function send() {
-    const t = draft;
-    if (!t.trim()) return;
-    setDraft("");
-    const r = replyingTo;
-    setReplyingTo(undefined);
-    await xmtp.sendMessage(t, r ? { id: r.id, senderInboxId: r.senderInboxId, text: r.text, mine: r.mine } : undefined);
-  }
-
-  const isUnread = (c: ConvSummary) =>
-    !!c.lastAt && !c.lastFromMe && c.id !== xmtp.activeId && c.lastAt > (prefs[c.id]?.lastReadAt ?? 0);
-
+  const isUnread = (c: ConvSummary) => !!c.lastAt && !c.lastFromMe && c.lastAt > (prefs[c.id]?.lastReadAt ?? 0);
   const rowProps = (c: ConvSummary) => ({
     c,
-    active: c.id === xmtp.activeId,
+    active: false,
     unread: isUnread(c),
     pinned: !!prefs[c.id]?.pinned,
     menuOpen: menuId === c.id,
@@ -232,108 +223,252 @@ function Chat({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
     onBlock: () => blockConv(c),
   });
 
-  return (
-    <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 280px) 1fr", minHeight: "440px" }} className="msg-grid">
-        <aside style={{ borderRight: "1px solid var(--color-border)", display: "flex", flexDirection: "column" }}>
-          <div style={{ padding: "0.85rem", borderBottom: "1px solid var(--color-border)", display: "flex", gap: "0.4rem" }}>
-            <input value={dmInput} onChange={(e) => setDmInput(e.target.value)} placeholder="New message — 0x address or name.eth" onKeyDown={(e) => e.key === "Enter" && start()} style={{ ...inputStyle, flex: 1 }} />
-            <button className="btn-primary" onClick={start} style={{ padding: "0.4rem 0.7rem", fontSize: "0.8rem" }}>Start</button>
-          </div>
-          <div style={{ overflowY: "auto", flex: 1 }}>
-            {xmtp.conversations.length === 0 ? (
-              <p style={{ ...dim, padding: "1rem" }}>No conversations yet. Start one with an address above.</p>
-            ) : (
-              <>
-                {requests.length > 0 && (
-                  <>
-                    <button onClick={() => setShowRequests((v) => !v)} style={{ ...discloseStyle, color: "var(--color-primary-hover)" }}>
-                      {showRequests ? "▾" : "▸"} Requests ({requests.length})
-                    </button>
-                    {showRequests && requests.map((c) => (
-                      <RequestRow
-                        key={c.id}
-                        c={c}
-                        onOpen={() => xmtp.openConversation(c.id)}
-                        onAccept={() => xmtp.setConvConsent(c.id, true)}
-                        onDecline={() => xmtp.setConvConsent(c.id, false)}
-                      />
-                    ))}
-                  </>
-                )}
-                {pinned.length > 0 && (
-                  <>
-                    <ListHeader>Pinned</ListHeader>
-                    {pinned.map((c, i) => (
-                      <ConvRow key={c.id} {...rowProps(c)} canUp={i > 0} canDown={i < pinned.length - 1} onUp={() => move(c.id, "up")} onDown={() => move(c.id, "down")} />
-                    ))}
-                  </>
-                )}
-                {recent.map((c) => <ConvRow key={c.id} {...rowProps(c)} />)}
-                {pinned.length === 0 && recent.length === 0 && archived.length > 0 && (
-                  <p style={{ ...dim, padding: "1rem" }}>All conversations archived.</p>
-                )}
+  const noChats = pinned.length === 0 && recent.length === 0 && requests.length === 0;
 
-                {archived.length > 0 && (
-                  <>
-                    <button onClick={() => setShowArchived((v) => !v)} style={discloseStyle}>
-                      {showArchived ? "▾" : "▸"} Archived ({archived.length})
-                    </button>
-                    {showArchived && archived.map((c) => <ConvRow key={c.id} {...rowProps(c)} archived />)}
-                  </>
-                )}
-                {blocked.length > 0 && (
-                  <>
-                    <button onClick={() => setShowBlocked((v) => !v)} style={discloseStyle}>
-                      {showBlocked ? "▾" : "▸"} Blocked ({blocked.length})
-                    </button>
-                    {showBlocked && blocked.map((addr) => (
-                      <div key={addr} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.4rem", padding: "0.5rem 0.85rem", borderBottom: "1px solid var(--color-border-light)" }}>
-                        <span style={{ minWidth: 0, overflow: "hidden" }}><AddressName address={addr} /></span>
-                        <button onClick={() => unblock(addr)} style={{ ...linkBtn, fontSize: "0.72rem", color: "var(--color-primary-hover)", flexShrink: 0 }}>Unblock</button>
-                      </div>
-                    ))}
-                  </>
-                )}
-              </>
-            )}
-          </div>
-        </aside>
-        <section style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-          {!xmtp.activeId ? (
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "2rem" }}>
-              <p style={{ ...dim, textAlign: "center" }}>Select a conversation, or start a new one with a wallet address.</p>
-            </div>
-          ) : (
-            <>
-              <ChatHeader
-                peer={active?.peerAddress}
-                title={active?.kind === "group" ? active.title : undefined}
-                receipts={settings.readReceipts}
-                onToggleReceipts={() => setReadReceipts(!settings.readReceipts)}
-              />
-              <DmMessageList
-                messages={xmtp.messages}
-                onReact={(id, inbox, emoji) => void xmtp.toggleReaction(id, inbox, emoji)}
-                onReply={setReplyingTo}
-                onRetry={(id) => void xmtp.retryMessage(id)}
-              />
-              <Composer
-                value={draft}
-                setValue={setDraft}
-                onSend={send}
-                header={replyingTo ? <ReplyBanner m={replyingTo} onCancel={() => setReplyingTo(undefined)} /> : undefined}
-              />
-            </>
-          )}
-        </section>
+  return (
+    <div>
+      {/* Archived — pinned to the very top */}
+      {archived.length > 0 && (
+        <>
+          <button onClick={() => setShowArchived((v) => !v)} style={discloseStyle}>
+            {showArchived ? "▾" : "▸"} Archived ({archived.length})
+          </button>
+          {showArchived && archived.map((c) => <ConvRow key={c.id} {...rowProps(c)} archived />)}
+        </>
+      )}
+
+      {/* Saved Messages — notes to self */}
+      <SpecialRow icon="🔖" title="Saved Messages" subtitle="Notes to self · on this device" onClick={onOpenSaved} />
+
+      {requests.length > 0 && (
+        <>
+          <button onClick={() => setShowRequests((v) => !v)} style={{ ...discloseStyle, color: "var(--color-primary-hover)" }}>
+            {showRequests ? "▾" : "▸"} Requests ({requests.length})
+          </button>
+          {showRequests && requests.map((c) => (
+            <RequestRow key={c.id} c={c} onOpen={() => xmtp.openConversation(c.id)} onAccept={() => xmtp.setConvConsent(c.id, true)} onDecline={() => xmtp.setConvConsent(c.id, false)} />
+          ))}
+        </>
+      )}
+
+      {pinned.length > 0 && (
+        <>
+          <ListHeader>Pinned</ListHeader>
+          {pinned.map((c, i) => (
+            <ConvRow key={c.id} {...rowProps(c)} canUp={i > 0} canDown={i < pinned.length - 1} onUp={() => move(c.id, "up")} onDown={() => move(c.id, "down")} />
+          ))}
+        </>
+      )}
+      {recent.map((c) => <ConvRow key={c.id} {...rowProps(c)} />)}
+
+      {/* Community rooms — token-gated group chat */}
+      <SpecialRow icon="🏛" title="Community rooms" subtitle="Token-gated group chat" onClick={onOpenRooms} />
+
+      {noChats && <p style={{ ...dim, padding: "1rem" }}>No conversations yet — use Search or Contacts to start one.</p>}
+    </div>
+  );
+}
+
+/** A non-DM list entry (Saved Messages, Community rooms) with an icon + chevron. */
+function SpecialRow({ icon, title, subtitle, onClick }: { icon: string; title: string; subtitle: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} style={{ display: "flex", alignItems: "center", gap: "0.6rem", width: "100%", textAlign: "left", padding: "0.6rem 0.85rem", border: "none", borderBottom: "1px solid var(--color-border-light)", background: "none", cursor: "pointer", fontFamily: "var(--font-sans)" }}>
+      <span style={{ width: 34, height: 34, flexShrink: 0, borderRadius: "50%", background: "var(--color-bg-subtle)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "1.05rem" }}>{icon}</span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: "block", fontSize: "0.85rem", fontWeight: 700, color: "var(--color-ink)" }}>{title}</span>
+        <span style={{ display: "block", fontSize: "0.72rem", color: "var(--color-ink-dim)" }}>{subtitle}</span>
+      </span>
+      <span style={{ marginLeft: "auto", color: "var(--color-ink-dim)", flexShrink: 0 }}>›</span>
+    </button>
+  );
+}
+
+/** Full-screen DM view (Telegram-style): back arrow + peer, messages, composer. */
+function DmChatView({ xmtp, onBack }: { xmtp: ReturnType<typeof useXmtp>; onBack: () => void }) {
+  const [draft, setDraft] = useState("");
+  const [replyingTo, setReplyingTo] = useState<ChatMessage>();
+  const active = xmtp.conversations.find((c) => c.id === xmtp.activeId);
+
+  useEffect(() => {
+    if (xmtp.activeId) markRead(xmtp.activeId, Date.now());
+  }, [xmtp.activeId, xmtp.messages.length]);
+
+  async function send() {
+    const t = draft;
+    if (!t.trim()) return;
+    setDraft("");
+    const r = replyingTo;
+    setReplyingTo(undefined);
+    await xmtp.sendMessage(t, r ? { id: r.id, senderInboxId: r.senderInboxId, text: r.text, mine: r.mine } : undefined);
+  }
+
+  return (
+    <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: "480px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.5rem 0.7rem", borderBottom: "1px solid var(--color-border)" }}>
+        <BackButton onClick={onBack} />
+        <span style={{ display: "inline-flex", alignItems: "center", minWidth: 0, fontFamily: "var(--font-sans)", fontSize: "0.9rem", fontWeight: 700, color: "var(--color-ink)" }}>
+          {active?.peerAddress ? <AddressName address={active.peerAddress} avatar /> : (active?.title ?? "Conversation")}
+        </span>
       </div>
+      <DmMessageList
+        messages={xmtp.messages}
+        onReact={(id, inbox, emoji) => void xmtp.toggleReaction(id, inbox, emoji)}
+        onReply={setReplyingTo}
+        onRetry={(id) => void xmtp.retryMessage(id)}
+      />
+      <Composer value={draft} setValue={setDraft} onSend={send} header={replyingTo ? <ReplyBanner m={replyingTo} onCancel={() => setReplyingTo(undefined)} /> : undefined} />
       {xmtp.error && (
         <p role="alert" style={{ fontFamily: "var(--font-sans)", fontSize: "0.78rem", color: "var(--color-ink)", padding: "0 0.85rem 0.85rem", margin: 0 }}>{xmtp.error}</p>
       )}
     </div>
   );
 }
+
+/** Saved Messages — a local notes-to-self chat (no XMTP; device-only). */
+function SavedChatView({ owner, onBack }: { owner?: string; onBack: () => void }) {
+  const saved = useSavedMessages(owner);
+  const [draft, setDraft] = useState("");
+  function send() {
+    const t = draft.trim();
+    if (!t) return;
+    addSavedMessage(owner, t);
+    setDraft("");
+  }
+  const messages: ChatMessage[] = saved.map((s) => ({
+    id: s.id, senderInboxId: "me", mine: true, text: s.text, sentAtMs: s.sentAtMs, status: "sent", reactions: [], readByPeer: false,
+  }));
+  return (
+    <div className="card" style={{ padding: 0, overflow: "hidden", display: "flex", flexDirection: "column", minHeight: "480px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.5rem 0.7rem", borderBottom: "1px solid var(--color-border)" }}>
+        <BackButton onClick={onBack} />
+        <span style={{ minWidth: 0 }}>
+          <span style={{ display: "block", fontFamily: "var(--font-sans)", fontSize: "0.9rem", fontWeight: 700, color: "var(--color-ink)" }}>🔖 Saved Messages</span>
+          <span style={{ display: "block", fontSize: "0.66rem", color: "var(--color-ink-dim)" }}>Notes to self — stored on this device</span>
+        </span>
+      </div>
+      <DmMessageList messages={messages} notes onDelete={(id) => deleteSavedMessage(owner, id)} onReact={() => {}} onReply={() => {}} onRetry={() => {}} />
+      <Composer value={draft} setValue={setDraft} onSend={send} />
+    </div>
+  );
+}
+
+/** Search existing chats, or paste an address / ENS to start a new one. */
+function SearchView({ xmtp }: { xmtp: ReturnType<typeof useXmtp> }) {
+  const [q, setQ] = useState("");
+  const query = q.trim();
+  const looksLikeTarget = /^0x[0-9a-fA-F]{40}$/.test(query) || (query.includes(".") && !query.includes(" "));
+  async function start() {
+    let target = query;
+    if (target.includes(".")) {
+      try {
+        const resolved = await getEnsAddress(wagmiConfig, { name: normalize(target), chainId: mainnet.id });
+        if (resolved) target = resolved;
+      } catch { /* startDm reports invalid */ }
+    }
+    const ok = await xmtp.startDm(target);
+    if (ok) setQ("");
+  }
+  const ql = query.toLowerCase();
+  const results = query
+    ? xmtp.conversations.filter((c) =>
+        (c.peerAddress?.toLowerCase().includes(ql) ?? false) ||
+        c.title.toLowerCase().includes(ql) ||
+        (c.lastText?.toLowerCase().includes(ql) ?? false)
+      )
+    : xmtp.conversations.slice().sort((a, b) => (b.lastAt ?? 0) - (a.lastAt ?? 0));
+  return (
+    <div style={{ padding: "0.85rem", display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+      <input
+        autoFocus
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && looksLikeTarget) start(); }}
+        placeholder="Search chats — or paste 0x / name.eth to start new"
+        style={{ ...inputStyle, width: "100%" }}
+      />
+      {looksLikeTarget && (
+        <button className="btn-primary" onClick={start} style={{ alignSelf: "flex-start", padding: "0.4rem 0.8rem", fontSize: "0.82rem" }}>Start chat with {query}</button>
+      )}
+      <div>
+        {results.length === 0 ? (
+          <p style={{ ...dim, padding: "0.5rem 0" }}>{query ? "No matching chats." : "No conversations yet."}</p>
+        ) : (
+          results.map((c) => (
+            <button key={c.id} onClick={() => xmtp.openConversation(c.id)} style={{ display: "flex", flexDirection: "column", width: "100%", textAlign: "left", gap: "0.1rem", padding: "0.5rem 0.4rem", border: "none", borderBottom: "1px solid var(--color-border-light)", background: "none", cursor: "pointer", fontFamily: "var(--font-sans)" }}>
+              <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--color-ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {c.peerAddress ? <AddressName address={c.peerAddress} /> : c.title}
+              </span>
+              {c.lastText && <span style={{ fontSize: "0.72rem", color: "var(--color-ink-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.lastFromMe ? "You: " : ""}{c.lastText}</span>}
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Settings: read-receipts toggle + blocked-list management. */
+function SettingsView({ onUnblock }: { onUnblock: (addr: string) => void }) {
+  const settings = useDmSettings();
+  const blocked = useBlocked();
+  return (
+    <div style={{ padding: "0.85rem", display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+      <ToggleRow
+        label="Read receipts"
+        desc="Let people see when you've read their messages — and see when they've read yours."
+        on={settings.readReceipts}
+        onToggle={() => setReadReceipts(!settings.readReceipts)}
+      />
+      <div>
+        <p className="text-label" style={{ marginBottom: "0.4rem" }}>Blocked ({blocked.length})</p>
+        {blocked.length === 0 ? (
+          <p style={{ ...dim, margin: 0 }}>No one blocked.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+            {blocked.map((addr) => (
+              <div key={addr} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem", padding: "0.3rem 0" }}>
+                <span style={{ minWidth: 0, overflow: "hidden" }}><AddressName address={addr} /></span>
+                <button onClick={() => { unblockAddr(addr); onUnblock(addr); }} style={{ ...linkBtn, fontSize: "0.74rem", color: "var(--color-primary-hover)", flexShrink: 0 }}>Unblock</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <p style={{ ...dim, lineHeight: 1.6, margin: 0 }}>
+        Direct messages are end-to-end encrypted over XMTP. Saved Messages and these preferences are stored only on this device.
+      </p>
+    </div>
+  );
+}
+
+function ToggleRow({ label, desc, on, onToggle }: { label: string; desc: string; on: boolean; onToggle: () => void }) {
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem" }}>
+      <span style={{ flex: 1, minWidth: 0 }}>
+        <span style={{ display: "block", fontFamily: "var(--font-sans)", fontSize: "0.9rem", fontWeight: 600, color: "var(--color-ink)" }}>{label}</span>
+        <span style={{ display: "block", fontFamily: "var(--font-sans)", fontSize: "0.78rem", color: "var(--color-ink-muted)", lineHeight: 1.5 }}>{desc}</span>
+      </span>
+      <button role="switch" aria-checked={on} onClick={onToggle} style={{ flexShrink: 0, width: 42, height: 24, borderRadius: 999, border: "none", cursor: "pointer", background: on ? "var(--color-primary)" : "var(--color-border)", position: "relative", transition: "background 0.15s" }}>
+        <span style={{ position: "absolute", top: 2, left: on ? 20 : 2, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left 0.15s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
+      </button>
+    </div>
+  );
+}
+
+function BackButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} aria-label="Back" title="Back to chats" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, border: "none", background: "none", cursor: "pointer", color: "var(--color-ink-muted)", flexShrink: 0, padding: 0 }}>
+      <IconBack />
+    </button>
+  );
+}
+
+/* Toolbar / nav icons (stroke = currentColor) */
+function IconSearch() { return (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>); }
+function IconContacts() { return (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></svg>); }
+function IconChat() { return (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 12a8 8 0 0 1-11.5 7.2L4 20l1-4.5A8 8 0 1 1 21 12z" /></svg>); }
+function IconGear() { return (<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" /></svg>); }
+function IconBack() { return (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M15 18l-6-6 6-6" /></svg>); }
 
 /** One conversation row: peer identity (ENS), recency, unread dot, and an options
  *  bar (pin/reorder · archive · block) revealed by the ⋯ toggle. */
@@ -784,23 +919,6 @@ function dayLabel(ms: number): string {
 }
 
 /** Chat header: who you're talking with + a read-receipts toggle. */
-function ChatHeader({ peer, title, receipts, onToggleReceipts }: { peer?: string; title?: string; receipts: boolean; onToggleReceipts: () => void }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", padding: "0.6rem 0.95rem", borderBottom: "1px solid var(--color-border)" }}>
-      <span style={{ fontFamily: "var(--font-sans)", fontSize: "0.85rem", fontWeight: 700, color: "var(--color-ink)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-        {peer ? <AddressName address={peer} avatar /> : (title ?? "Conversation")}
-      </span>
-      <button
-        onClick={onToggleReceipts}
-        title={receipts ? "Read receipts on — peers can see when you've read their messages. Click to turn off." : "Read receipts off. Click to turn on."}
-        style={{ ...linkBtn, marginLeft: "auto", fontSize: "0.7rem", color: receipts ? "var(--color-primary-hover)" : "var(--color-ink-dim)", flexShrink: 0 }}
-      >
-        {receipts ? "✓✓" : "✓"} Receipts {receipts ? "on" : "off"}
-      </button>
-    </div>
-  );
-}
-
 function DayDivider({ label }: { label: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", margin: "0.7rem 0 0.4rem" }}>
@@ -811,11 +929,13 @@ function DayDivider({ label }: { label: string }) {
   );
 }
 
-function DmMessageList({ messages, onReact, onReply, onRetry }: {
+function DmMessageList({ messages, onReact, onReply, onRetry, notes, onDelete }: {
   messages: ChatMessage[];
   onReact: (id: string, inbox: string, emoji: string) => void;
   onReply: (m: ChatMessage) => void;
   onRetry: (id: string) => void;
+  notes?: boolean;
+  onDelete?: (id: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -832,7 +952,7 @@ function DmMessageList({ messages, onReact, onReply, onRetry }: {
   useEffect(() => { endRef.current?.scrollIntoView({ block: "end" }); }, []);
 
   if (messages.length === 0) {
-    return <div style={{ flex: 1, display: "flex", padding: "1rem" }}><p style={{ ...dim, margin: "auto" }}>No messages yet — say hello.</p></div>;
+    return <div style={{ flex: 1, display: "flex", padding: "1rem" }}><p style={{ ...dim, margin: "auto" }}>{notes ? "No notes yet — type below to save one." : "No messages yet — say hello."}</p></div>;
   }
   let lastDay = "";
   return (
@@ -844,7 +964,7 @@ function DmMessageList({ messages, onReact, onReply, onRetry }: {
         return (
           <div key={m.id}>
             {showDay && <DayDivider label={day} />}
-            <DmBubble m={m} onReact={onReact} onReply={onReply} onRetry={onRetry} />
+            <DmBubble m={m} onReact={onReact} onReply={onReply} onRetry={onRetry} notes={notes} onDelete={onDelete} />
           </div>
         );
       })}
@@ -853,11 +973,13 @@ function DmMessageList({ messages, onReact, onReply, onRetry }: {
   );
 }
 
-function DmBubble({ m, onReact, onReply, onRetry }: {
+function DmBubble({ m, onReact, onReply, onRetry, notes, onDelete }: {
   m: ChatMessage;
   onReact: (id: string, inbox: string, emoji: string) => void;
   onReply: (m: ChatMessage) => void;
   onRetry: (id: string) => void;
+  notes?: boolean;
+  onDelete?: (id: string) => void;
 }) {
   const [hover, setHover] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -877,19 +999,25 @@ function DmBubble({ m, onReact, onReply, onRetry }: {
         <Bubble mine={m.mine} text={m.text} />
         {(hover || pickerOpen) && !pending && (
           <span style={{ display: "inline-flex", gap: "0.15rem", flexShrink: 0, position: "relative" }}>
-            <IconBtn title="React" onClick={() => setPickerOpen((v) => !v)}>☺</IconBtn>
-            <IconBtn title="Reply" onClick={() => onReply(m)}>↩</IconBtn>
-            {pickerOpen && (
-              <div style={{ position: "absolute", bottom: "100%", [m.mine ? "right" : "left"]: 0, marginBottom: 4, display: "flex", gap: "0.1rem", background: "#fff", border: "1px solid var(--color-border)", borderRadius: "999px", padding: "0.2rem 0.35rem", boxShadow: "0 4px 14px rgba(0,0,0,0.12)", zIndex: 5 } as React.CSSProperties}>
-                {QUICK_EMOJI.map((e) => (
-                  <button key={e} onClick={() => { onReact(m.id, m.senderInboxId, e); setPickerOpen(false); }} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "1rem", lineHeight: 1, padding: "0.1rem" }}>{e}</button>
-                ))}
-              </div>
+            {notes ? (
+              onDelete && <IconBtn title="Delete note" onClick={() => onDelete(m.id)}>🗑</IconBtn>
+            ) : (
+              <>
+                <IconBtn title="React" onClick={() => setPickerOpen((v) => !v)}>☺</IconBtn>
+                <IconBtn title="Reply" onClick={() => onReply(m)}>↩</IconBtn>
+                {pickerOpen && (
+                  <div style={{ position: "absolute", bottom: "100%", [m.mine ? "right" : "left"]: 0, marginBottom: 4, display: "flex", gap: "0.1rem", background: "#fff", border: "1px solid var(--color-border)", borderRadius: "999px", padding: "0.2rem 0.35rem", boxShadow: "0 4px 14px rgba(0,0,0,0.12)", zIndex: 5 } as React.CSSProperties}>
+                    {QUICK_EMOJI.map((e) => (
+                      <button key={e} onClick={() => { onReact(m.id, m.senderInboxId, e); setPickerOpen(false); }} style={{ border: "none", background: "none", cursor: "pointer", fontSize: "1rem", lineHeight: 1, padding: "0.1rem" }}>{e}</button>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </span>
         )}
       </div>
-      {m.reactions.length > 0 && (
+      {!notes && m.reactions.length > 0 && (
         <div style={{ display: "flex", gap: "0.25rem", flexWrap: "wrap", alignSelf: align, marginTop: "0.1rem" }}>
           {m.reactions.map((r) => (
             <button
@@ -905,11 +1033,11 @@ function DmBubble({ m, onReact, onReply, onRetry }: {
       )}
       <div style={{ display: "flex", alignItems: "center", gap: "0.3rem", alignSelf: align, fontSize: "0.62rem", color: "var(--color-ink-dim)", padding: "0 0.15rem" }}>
         <span>{timeLabel(m.sentAtMs)}</span>
-        {m.mine && m.status === "sending" && <span>· Sending…</span>}
-        {m.mine && m.status === "failed" && (
+        {!notes && m.mine && m.status === "sending" && <span>· Sending…</span>}
+        {!notes && m.mine && m.status === "failed" && (
           <button onClick={() => onRetry(m.id)} style={{ ...linkBtn, fontSize: "0.62rem", color: "#9a2a2a" }}>· Failed · Retry</button>
         )}
-        {m.mine && m.status === "sent" && (
+        {!notes && m.mine && m.status === "sent" && (
           <span title={m.readByPeer ? "Read" : "Sent"} style={{ color: m.readByPeer ? "var(--color-primary-hover)" : "var(--color-ink-dim)" }}>{m.readByPeer ? "✓✓" : "✓"}</span>
         )}
       </div>
