@@ -1162,11 +1162,26 @@ function ManageMembers({ push, chatId, me, roomKey, icon }: { push: PushClient; 
   if (!amAdmin) return null; // only room admins manage roles
 
   async function add() {
-    if (!/^0x[a-fA-F0-9]{40}$/.test(addr.trim())) { setErr("Enter a valid 0x address."); return; }
+    const input = addr.trim();
     setBusy(true); setErr(undefined);
-    try { await setRoomRole(push, chatId, [addr.trim()], role); setAddr(""); await load(); }
-    catch (e) { setErr(e instanceof Error ? e.message : "Failed"); }
-    finally { setBusy(false); }
+    try {
+      let resolved = input;
+      if (!/^0x[a-fA-F0-9]{40}$/.test(input)) {
+        // Not a raw 0x address — treat it as an ENS name and resolve on mainnet.
+        if (!input.includes(".")) { setErr("Enter a 0x address or an ENS name."); return; }
+        let a: string | null = null;
+        try { a = await getEnsAddress(wagmiConfig, { name: normalize(input), chainId: mainnet.id }); } catch { a = null; }
+        if (!a) { setErr(`Couldn't resolve "${input}" to an address.`); return; }
+        resolved = a;
+      }
+      await setRoomRole(push, chatId, [resolved], role);
+      setAddr("");
+      await load();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
   }
   async function saveIcon() {
     if (!walletClient || !address) { setErr("Connect your wallet to set an avatar."); return; }
@@ -1202,7 +1217,7 @@ function ManageMembers({ push, chatId, me, roomKey, icon }: { push: PushClient; 
             </div>
           </div>
           <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", alignItems: "center" }}>
-            <input value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="0x address" style={{ ...inputStyle, flex: 1, minWidth: "180px", fontFamily: "var(--font-mono)", fontSize: "0.78rem" }} />
+            <input value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="0x address or ENS name" style={{ ...inputStyle, flex: 1, minWidth: "180px", fontSize: "0.78rem" }} />
             <select value={role} onChange={(e) => setRole(e.target.value as RoomRole)} style={{ ...inputStyle, width: "auto" }}>
               <option value="MEMBER">Member</option>
               <option value="ADMIN">Admin</option>
