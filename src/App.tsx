@@ -260,15 +260,16 @@ function Footer() {
       <div style={{ maxWidth: "1140px", margin: "0 auto", padding: "2.5rem 1.5rem 1.5rem" }}>
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-            gap: "1.5rem",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "4rem",
+            justifyContent: "center",
             paddingBottom: "1.75rem",
             borderBottom: "1px solid var(--color-border)",
           }}
         >
           {FOOTER_COLS.map((col) => (
-            <div key={col.title} style={{ display: "flex", flexDirection: "column" }}>
+            <div key={col.title} style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
               <p style={{ fontSize: "0.68rem", color: "var(--color-ink-dim)", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 700, marginBottom: "0.5rem" }}>
                 {col.title}
               </p>
@@ -279,18 +280,18 @@ function Footer() {
         <div
           style={{
             display: "flex",
-            flexWrap: "wrap",
+            flexDirection: "column",
             alignItems: "center",
-            justifyContent: "space-between",
-            gap: "0.5rem",
+            gap: "0.35rem",
             paddingTop: "1.25rem",
+            textAlign: "center",
           }}
         >
+          <p style={{ fontSize: "0.7rem", color: "var(--color-ink-dim)", margin: 0, maxWidth: "640px" }}>
+            For information only. Nothing here is financial advice or an offer or solicitation to buy or sell any security.
+          </p>
           <p style={{ fontSize: "0.72rem", color: "var(--color-ink-dim)", margin: 0 }}>
             &copy; {new Date().getFullYear()} Bittrees, Inc.
-          </p>
-          <p style={{ fontSize: "0.7rem", color: "var(--color-ink-dim)", margin: 0, maxWidth: "560px", textAlign: "right" }}>
-            For information only. Nothing here is financial advice or an offer or solicitation to buy or sell any security.
           </p>
         </div>
       </div>
