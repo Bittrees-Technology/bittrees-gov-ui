@@ -581,6 +581,7 @@ function RolesAdmin({ address }: { address: `0x${string}` }) {
   }
   async function create() {
     if (!walletClient || newLabel.trim().length === 0) { setCreateError("Enter a role name."); return; }
+    if (options.some((o) => o.label.toLowerCase() === newLabel.trim().toLowerCase())) { setCreateError(`Role "${newLabel.trim()}" already exists.`); return; }
     setCreating(true);
     setCreateError(undefined);
     try {

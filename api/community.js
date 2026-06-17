@@ -180,6 +180,10 @@ export default async function handler(req, res) {
       const defs = (await readJson(ROLEDEFS_KEY, [])) || [];
       const without = defs.filter((d) => String(d.label || "").toLowerCase() !== label.toLowerCase());
       if (body.createRole) {
+        // Reject duplicates — a role with this title already exists (built-in or catalog).
+        const RESERVED = ["operations", "moderator", "partner", "junior partner", "associate", "shareholder"];
+        const dup = RESERVED.includes(label.toLowerCase()) || defs.some((d) => String(d.label || "").toLowerCase() === label.toLowerCase());
+        if (dup) { res.status(409).json({ error: `Role "${label}" already exists` }); return; }
         const def = { label, color: String(op.color || "").slice(0, 16), description: String(op.description || "").slice(0, 200) };
         const next = [...without, def];
         await writeJson(ROLEDEFS_KEY, next);
