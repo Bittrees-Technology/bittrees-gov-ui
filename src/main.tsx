@@ -16,7 +16,7 @@ const queryClient = new QueryClient({
       // don't refetch on every window-focus, and retry sparingly. The app still
       // refreshes on navigation and after the user's own transactions.
       staleTime: 60_000,
-      gcTime: 5 * 60 * 1000,
+      gcTime: 30 * 60 * 1000,
       retry: 1,
       refetchOnWindowFocus: false,
     },
