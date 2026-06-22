@@ -18,6 +18,7 @@ import Vision from "./pages/Vision";
 import CodeOfConduct from "./pages/CodeOfConduct";
 import Metaverse from "./pages/Metaverse";
 import TokenFlow from "./pages/TokenFlow";
+import Chirpy from "./pages/Chirpy";
 import { ConfigBanner } from "./components/ConfigBanner";
 import { FAMILY, GOV_LINKS, ROUTES } from "./lib/links";
 
@@ -55,6 +56,7 @@ export default function App() {
             <Route path={ROUTES.vision} element={<Vision />} />
             <Route path={ROUTES.codeOfConduct} element={<CodeOfConduct />} />
             <Route path={ROUTES.metaverse} element={<Metaverse />} />
+            <Route path={ROUTES.chirpy} element={<Chirpy />} />
             <Route path="/69420" element={<TokenFlow />} />
           </Routes>
         </main>
@@ -235,6 +237,7 @@ const FOOTER_COLS: { title: string; links: FooterLinkDef[] }[] = [
     links: [
       { label: "Become a contributor", href: ROUTES.contribute },
       { label: "Chat", href: ROUTES.messenger },
+      { label: "Chirpy app", href: ROUTES.chirpy },
       { label: "X / Twitter", href: GOV_LINKS.twitter, external: true },
       { label: "Handbook (wiki)", href: GOV_LINKS.wiki, external: true },
     ],

@@ -45,6 +45,7 @@ export const ROUTES = {
   vision: "/vision",
   codeOfConduct: "/code-of-conduct",
   metaverse: "/hq",
+  chirpy: "/chirpy",
 } as const;
 
 export function etherscanAddress(addr: string): string {
