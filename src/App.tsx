@@ -27,6 +27,7 @@ const NAV = [
   { to: ROUTES.proposals, label: "Proposals", end: false },
   { to: ROUTES.forum, label: "Forum", end: false },
   { to: ROUTES.messenger, label: "Chat", end: false },
+  { to: ROUTES.chirpy, label: "Chirpy", end: false },
   { to: ROUTES.structure, label: "Structure", end: false },
   { to: ROUTES.mint, label: "BGOV", end: false },
 ];
